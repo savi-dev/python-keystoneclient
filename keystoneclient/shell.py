@@ -19,6 +19,7 @@ Command-line interface to the OpenStack Identity API.
 """
 
 import argparse
+import getpass
 import httplib2
 import os
 import sys
@@ -66,42 +67,56 @@ class OpenStackIdentityShell(object):
                             action='store_true',
                             help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_username',
+        parser.add_argument('--os-username',
                             metavar='<auth-user-name>',
                             default=env('OS_USERNAME'),
                             help='Defaults to env[OS_USERNAME]')
+        parser.add_argument('--os_username',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_password',
+        parser.add_argument('--os-password',
                             metavar='<auth-password>',
                             default=env('OS_PASSWORD'),
                             help='Defaults to env[OS_PASSWORD]')
+        parser.add_argument('--os_password',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_tenant_name',
+        parser.add_argument('--os-tenant-name',
                             metavar='<auth-tenant-name>',
                             default=env('OS_TENANT_NAME'),
                             help='Defaults to env[OS_TENANT_NAME]')
+        parser.add_argument('--os_tenant_name',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_tenant_id',
+        parser.add_argument('--os-tenant-id',
                             metavar='<tenant-id>',
                             default=env('OS_TENANT_ID'),
                             help='Defaults to env[OS_TENANT_ID]')
+        parser.add_argument('--os_tenant_id',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_auth_url',
+        parser.add_argument('--os-auth-url',
                             metavar='<auth-url>',
                             default=env('OS_AUTH_URL'),
                             help='Defaults to env[OS_AUTH_URL]')
+        parser.add_argument('--os_auth_url',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_region_name',
+        parser.add_argument('--os-region-name',
                             metavar='<region-name>',
                             default=env('OS_REGION_NAME'),
                             help='Defaults to env[OS_REGION_NAME]')
+        parser.add_argument('--os_region_name',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_identity_api_version',
+        parser.add_argument('--os-identity-api-version',
                             metavar='<identity-api-version>',
                             default=env('OS_IDENTITY_API_VERSION',
                                         'KEYSTONE_VERSION'),
                             help='Defaults to env[OS_IDENTITY_API_VERSION]'
                                  ' or 2.0')
+        parser.add_argument('--os_identity_api_version',
+                            help=argparse.SUPPRESS)
 
         parser.add_argument('--token',
                             metavar='<service-token>',
@@ -112,6 +127,50 @@ class OpenStackIdentityShell(object):
                             metavar='<service-endpoint>',
                             default=env('SERVICE_ENDPOINT'),
                             help='Defaults to env[SERVICE_ENDPOINT]')
+
+        parser.add_argument('--os_cacert', metavar='<ca-certificate>',
+                            default=env('OS_CA_CERT'),
+                            help='Defaults to env[OS_CA_CERT]')
+
+        parser.add_argument('--os_cert', metavar='<certificate>',
+                            default=env('OS_CERT'),
+                            help='Defaults to env[OS_CERT]')
+
+        parser.add_argument('--os_key', metavar='<key>',
+                            default=env('OS_KEY'),
+                            help='Defaults to env[OS_KEY]')
+
+        parser.add_argument('--insecure',
+                            default=False,
+                            action="store_true",
+                            help="Explicitly allow keystoneclient to perform "
+                                 "\"insecure\" SSL (https) requests. The "
+                                 "server's certificate will not be verified "
+                                 "against any certificate authorities. This "
+                                 "option should be used with caution.")
+
+        # FIXME(dtroyer): The args below are here for diablo compatibility,
+        #                 remove them in folsum cycle
+
+        parser.add_argument('--username',
+                            metavar='<auth-user-name>',
+                            help='Deprecated')
+
+        parser.add_argument('--password',
+                            metavar='<auth-password>',
+                            help='Deprecated')
+
+        parser.add_argument('--tenant_name',
+                            metavar='<tenant-name>',
+                            help='Deprecated')
+
+        parser.add_argument('--auth_url',
+                            metavar='<auth-url>',
+                            help='Deprecated')
+
+        parser.add_argument('--region_name',
+                            metavar='<region-name>',
+                            help='Deprecated')
 
         return parser
 
@@ -131,8 +190,17 @@ class OpenStackIdentityShell(object):
         self._find_actions(subparsers, actions_module)
         self._find_actions(subparsers, shell_generic)
         self._find_actions(subparsers, self)
+        self._add_bash_completion_subparser(subparsers)
 
         return parser
+
+    def _add_bash_completion_subparser(self, subparsers):
+        subparser = subparsers.add_parser('bash_completion',
+            add_help=False,
+            formatter_class=OpenStackHelpFormatter
+        )
+        self.subcommands['bash_completion'] = subparser
+        subparser.set_defaults(func=self.do_bash_completion)
 
     def _find_actions(self, subparsers, actions_module):
         for attr in (a for a in dir(actions_module) if a.startswith('do_')):
@@ -183,6 +251,9 @@ class OpenStackIdentityShell(object):
         if args.func == self.do_help:
             self.do_help(args)
             return 0
+        elif args.func == self.do_bash_completion:
+            self.do_bash_completion(args)
+            return 0
 
         #FIXME(usrleon): Here should be restrict for project id same as
         # for username or apikey but for compatibility it is not.
@@ -195,7 +266,7 @@ class OpenStackIdentityShell(object):
                                        '  either a service token, '
                                        '--token or env[SERVICE_TOKEN], \n'
                                        '  or credentials, '
-                                       '--os_username or env[OS_USERNAME].')
+                                       '--os-username or env[OS_USERNAME].')
 
             # if it looks like the user wants to provide a service token
             # but is missing something
@@ -219,20 +290,35 @@ class OpenStackIdentityShell(object):
                 if not args.os_username:
                     raise exc.CommandError(
                         'Expecting a username provided via either '
-                        '--os_username or env[OS_USERNAME]')
+                        '--os-username or env[OS_USERNAME]')
 
                 if not args.os_password:
-                    raise exc.CommandError(
-                        'Expecting a password provided via either '
-                        '--os_password or env[OS_PASSWORD]')
+                    # No password, If we've got a tty, try prompting for it
+                    if hasattr(sys.stdin, 'isatty') and sys.stdin.isatty():
+                        # Check for Ctl-D
+                        try:
+                            args.os_password = getpass.getpass('OS Password: ')
+                        except EOFError:
+                            pass
+                    # No password because we did't have a tty or the
+                    # user Ctl-D when prompted?
+                    if not args.os_password:
+                        raise exc.CommandError(
+                            'Expecting a password provided via either '
+                            '--os-password, env[OS_PASSWORD], or '
+                            'prompted response')
 
                 if not args.os_auth_url:
                     raise exc.CommandError(
-                        'Expecting an auth URL via either --os_auth_url or '
+                        'Expecting an auth URL via either --os-auth-url or '
                         'env[OS_AUTH_URL]')
 
         if utils.isunauthenticated(args.func):
-            self.cs = shell_generic.CLIENT_CLASS(endpoint=args.os_auth_url)
+            self.cs = shell_generic.CLIENT_CLASS(endpoint=args.os_auth_url,
+                                                 cacert=args.os_cacert,
+                                                 key=args.os_key,
+                                                 cert=args.os_cert,
+                                                 insecure=args.insecure)
         else:
             token = None
             endpoint = None
@@ -248,7 +334,11 @@ class OpenStackIdentityShell(object):
                 endpoint=endpoint,
                 password=args.os_password,
                 auth_url=args.os_auth_url,
-                region_name=args.os_region_name)
+                region_name=args.os_region_name,
+                cacert=args.os_cacert,
+                key=args.os_key,
+                cert=args.os_cert,
+                insecure=args.insecure)
 
         try:
             args.func(self.cs, args)
@@ -264,6 +354,22 @@ class OpenStackIdentityShell(object):
             }[version]
         except KeyError:
             return shell_v2_0.CLIENT_CLASS
+
+    def do_bash_completion(self, args):
+        """
+        Prints all of the commands and options to stdout.
+        The keystone.bash_completion script doesn't have to hard code them.
+        """
+        commands = set()
+        options = set()
+        for sc_str, sc in self.subcommands.items():
+            commands.add(sc_str)
+            for option in sc._optionals._option_string_actions.keys():
+                options.add(option)
+
+        commands.remove('bash-completion')
+        commands.remove('bash_completion')
+        print ' '.join(commands | options)
 
     @utils.arg('command', metavar='<subcommand>', nargs='?',
                           help='Display help for <subcommand>')

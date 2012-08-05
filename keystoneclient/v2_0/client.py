@@ -19,6 +19,7 @@ from keystoneclient import exceptions
 from keystoneclient import service_catalog
 from keystoneclient.v2_0 import ec2
 from keystoneclient.v2_0 import endpoints
+from keystoneclient.v2_0 import policies
 from keystoneclient.v2_0 import roles
 from keystoneclient.v2_0 import services
 from keystoneclient.v2_0 import tenants
@@ -65,6 +66,7 @@ class Client(client.HTTPClient):
         """ Initialize a new client for the Keystone v2.0 API. """
         super(Client, self).__init__(endpoint=endpoint, **kwargs)
         self.endpoints = endpoints.EndpointManager(self)
+        self.policies = policies.PolicyManager(self)
         self.roles = roles.RoleManager(self)
         self.services = services.ServiceManager(self)
         self.tenants = tenants.TenantManager(self)
