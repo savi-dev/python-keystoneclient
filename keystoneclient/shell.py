@@ -19,6 +19,7 @@ Command-line interface to the OpenStack Identity API.
 """
 
 import argparse
+import getpass
 import httplib2
 import os
 import sys
@@ -138,6 +139,15 @@ class OpenStackIdentityShell(object):
         parser.add_argument('--os_key', metavar='<key>',
                             default=env('OS_KEY'),
                             help='Defaults to env[OS_KEY]')
+
+        parser.add_argument('--insecure',
+                            default=False,
+                            action="store_true",
+                            help="Explicitly allow keystoneclient to perform "
+                                 "\"insecure\" SSL (https) requests. The "
+                                 "server's certificate will not be verified "
+                                 "against any certificate authorities. This "
+                                 "option should be used with caution.")
 
         # FIXME(dtroyer): The args below are here for diablo compatibility,
         #                 remove them in folsum cycle
@@ -283,9 +293,26 @@ class OpenStackIdentityShell(object):
                         '--os-username or env[OS_USERNAME]')
 
                 if not args.os_password:
+<<<<<<< HEAD
                     raise exc.CommandError(
                         'Expecting a password provided via either '
                         '--os-password or env[OS_PASSWORD]')
+=======
+                    # No password, If we've got a tty, try prompting for it
+                    if hasattr(sys.stdin, 'isatty') and sys.stdin.isatty():
+                        # Check for Ctl-D
+                        try:
+                            args.os_password = getpass.getpass('OS Password: ')
+                        except EOFError:
+                            pass
+                    # No password because we did't have a tty or the
+                    # user Ctl-D when prompted?
+                    if not args.os_password:
+                        raise exc.CommandError(
+                            'Expecting a password provided via either '
+                            '--os-password, env[OS_PASSWORD], or '
+                            'prompted response')
+>>>>>>> mf/rbac-api
 
                 if not args.os_auth_url:
                     raise exc.CommandError(
@@ -296,7 +323,12 @@ class OpenStackIdentityShell(object):
             self.cs = shell_generic.CLIENT_CLASS(endpoint=args.os_auth_url,
                                                  cacert=args.os_cacert,
                                                  key=args.os_key,
+<<<<<<< HEAD
                                                  cert=args.os_cert)
+=======
+                                                 cert=args.os_cert,
+                                                 insecure=args.insecure)
+>>>>>>> mf/rbac-api
         else:
             token = None
             endpoint = None
@@ -315,7 +347,12 @@ class OpenStackIdentityShell(object):
                 region_name=args.os_region_name,
                 cacert=args.os_cacert,
                 key=args.os_key,
+<<<<<<< HEAD
                 cert=args.os_cert)
+=======
+                cert=args.os_cert,
+                insecure=args.insecure)
+>>>>>>> mf/rbac-api
 
         try:
             args.func(self.cs, args)

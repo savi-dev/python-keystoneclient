@@ -100,6 +100,11 @@ You'll find complete documentation on the shell by running
         endpoint-get        Find endpoint filtered by a specific attribute or
                             service type
         endpoint-list       List configured service endpoints
+        policy-create       Create a new access control policy
+        policy-delete       Delete an access control policy
+        policy-get          Display access control policy details
+        policy-list         List all access control policies
+        policy-update       Update an existing access control policyp
         role-create         Create new role
         role-delete         Delete role
         role-get            Display role details

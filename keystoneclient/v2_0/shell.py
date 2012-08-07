@@ -409,3 +409,57 @@ def do_endpoint_delete(kc, args):
 def do_token_get(kc, args):
     """Display the current user token"""
     utils.print_dict(kc.service_catalog.get_token())
+
+
+@utils.arg('--endpoint-id', metavar='<endpoint-id>',
+           help='Filter policy list by endpoint')
+def do_policy_list(kc, args):
+    """List all access control policies"""
+    policies = kc.policies.list(endpoint=args.endpoint_id)
+    utils.print_list(policies, ['id', 'endpoint_id', 'type'])
+
+
+@utils.arg('id', metavar='<policy-id>', help='ID of the policy to display')
+def do_policy_get(kc, args):
+    """Display access control policy details"""
+    policy = kc.policies.get(args.id)
+    utils.print_dict(policy._info)
+
+
+@utils.arg('--policy', metavar='<policy-blob>', required=True,
+           help='Serialized policy blob (assumed to be JSON by default).')
+@utils.arg('--type', metavar='<mime-type>',
+           help='Serialization format of the policy blob '
+                '(application/json by default).',
+           default='application/json')
+@utils.arg('--endpoint-id', metavar='<endpoint-id>', required=True,
+           help='ID of the endpoint the policy applies to.')
+def do_policy_create(kc, args):
+    """Create a new access control policy"""
+    policy = kc.policies.create(blob=args.policy,
+                                type=args.type,
+                                endpoint=args.endpoint_id)
+    utils.print_dict(policy._info)
+
+
+@utils.arg('id', metavar='<policy-id>', help='ID of the policy to update')
+@utils.arg('--policy', metavar='<policy-blob>',
+           help='Serialized policy blob (assumed to be JSON by default).')
+@utils.arg('--type', metavar='<mime-type>',
+           help='Serialization format of the policy blob '
+                '(application/json by default).')
+@utils.arg('--endpoint-id', metavar='<endpoint-id>',
+           help='ID of the endpoint the policy applies to.')
+def do_policy_update(kc, args):
+    """Update an existing access control policy"""
+    policy = kc.policies.update(policy=args.id,
+                                blob=args.policy,
+                                type=args.type,
+                                endpoint=args.endpoint_id)
+    utils.print_dict(policy._info)
+
+
+@utils.arg('id', metavar='<policy-id>', help='ID of the policy to delete')
+def do_policy_delete(kc, args):
+    """Delete an access control policy"""
+    kc.policies.delete(args.id)
