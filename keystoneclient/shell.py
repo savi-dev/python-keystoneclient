@@ -293,11 +293,6 @@ class OpenStackIdentityShell(object):
                         '--os-username or env[OS_USERNAME]')
 
                 if not args.os_password:
-<<<<<<< HEAD
-                    raise exc.CommandError(
-                        'Expecting a password provided via either '
-                        '--os-password or env[OS_PASSWORD]')
-=======
                     # No password, If we've got a tty, try prompting for it
                     if hasattr(sys.stdin, 'isatty') and sys.stdin.isatty():
                         # Check for Ctl-D
@@ -312,7 +307,6 @@ class OpenStackIdentityShell(object):
                             'Expecting a password provided via either '
                             '--os-password, env[OS_PASSWORD], or '
                             'prompted response')
->>>>>>> mf/rbac-api
 
                 if not args.os_auth_url:
                     raise exc.CommandError(
@@ -323,12 +317,8 @@ class OpenStackIdentityShell(object):
             self.cs = shell_generic.CLIENT_CLASS(endpoint=args.os_auth_url,
                                                  cacert=args.os_cacert,
                                                  key=args.os_key,
-<<<<<<< HEAD
-                                                 cert=args.os_cert)
-=======
                                                  cert=args.os_cert,
                                                  insecure=args.insecure)
->>>>>>> mf/rbac-api
         else:
             token = None
             endpoint = None
@@ -347,12 +337,8 @@ class OpenStackIdentityShell(object):
                 region_name=args.os_region_name,
                 cacert=args.os_cacert,
                 key=args.os_key,
-<<<<<<< HEAD
-                cert=args.os_cert)
-=======
                 cert=args.os_cert,
                 insecure=args.insecure)
->>>>>>> mf/rbac-api
 
         try:
             args.func(self.cs, args)
