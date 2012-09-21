@@ -19,6 +19,7 @@ Command-line interface to the OpenStack Identity API.
 """
 
 import argparse
+import getpass
 import httplib2
 import os
 import sys
@@ -127,17 +128,35 @@ class OpenStackIdentityShell(object):
                             default=env('SERVICE_ENDPOINT'),
                             help='Defaults to env[SERVICE_ENDPOINT]')
 
-        parser.add_argument('--os_cacert', metavar='<ca-certificate>',
+        parser.add_argument('--os-cacert',
+                            metavar='<ca-certificate>',
                             default=env('OS_CA_CERT'),
-                            help='Defaults to env[OS_CA_CERT]')
+                            help='Defaults to env[OS_CACERT]')
+        parser.add_argument('--os_cacert',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_cert', metavar='<certificate>',
+        parser.add_argument('--os-cert',
+                            metavar='<certificate>',
                             default=env('OS_CERT'),
                             help='Defaults to env[OS_CERT]')
+        parser.add_argument('--os_cert',
+                            help=argparse.SUPPRESS)
 
-        parser.add_argument('--os_key', metavar='<key>',
+        parser.add_argument('--os-key',
+                            metavar='<key>',
                             default=env('OS_KEY'),
                             help='Defaults to env[OS_KEY]')
+        parser.add_argument('--os_key',
+                            help=argparse.SUPPRESS)
+
+        parser.add_argument('--insecure',
+                            default=False,
+                            action="store_true",
+                            help="Explicitly allow keystoneclient to perform "
+                                 "\"insecure\" SSL (https) requests. The "
+                                 "server's certificate will not be verified "
+                                 "against any certificate authorities. This "
+                                 "option should be used with caution.")
 
         # FIXME(dtroyer): The args below are here for diablo compatibility,
         #                 remove them in folsum cycle
@@ -185,7 +204,8 @@ class OpenStackIdentityShell(object):
         return parser
 
     def _add_bash_completion_subparser(self, subparsers):
-        subparser = subparsers.add_parser('bash_completion',
+        subparser = subparsers.add_parser(
+            'bash_completion',
             add_help=False,
             formatter_class=OpenStackHelpFormatter
         )
@@ -283,9 +303,20 @@ class OpenStackIdentityShell(object):
                         '--os-username or env[OS_USERNAME]')
 
                 if not args.os_password:
-                    raise exc.CommandError(
-                        'Expecting a password provided via either '
-                        '--os-password or env[OS_PASSWORD]')
+                    # No password, If we've got a tty, try prompting for it
+                    if hasattr(sys.stdin, 'isatty') and sys.stdin.isatty():
+                        # Check for Ctl-D
+                        try:
+                            args.os_password = getpass.getpass('OS Password: ')
+                        except EOFError:
+                            pass
+                    # No password because we did't have a tty or the
+                    # user Ctl-D when prompted?
+                    if not args.os_password:
+                        raise exc.CommandError(
+                            'Expecting a password provided via either '
+                            '--os-password, env[OS_PASSWORD], or '
+                            'prompted response')
 
                 if not args.os_auth_url:
                     raise exc.CommandError(
@@ -296,7 +327,8 @@ class OpenStackIdentityShell(object):
             self.cs = shell_generic.CLIENT_CLASS(endpoint=args.os_auth_url,
                                                  cacert=args.os_cacert,
                                                  key=args.os_key,
-                                                 cert=args.os_cert)
+                                                 cert=args.os_cert,
+                                                 insecure=args.insecure)
         else:
             token = None
             endpoint = None
@@ -315,7 +347,8 @@ class OpenStackIdentityShell(object):
                 region_name=args.os_region_name,
                 cacert=args.os_cacert,
                 key=args.os_key,
-                cert=args.os_cert)
+                cert=args.os_cert,
+                insecure=args.insecure)
 
         try:
             args.func(self.cs, args)
@@ -349,7 +382,7 @@ class OpenStackIdentityShell(object):
         print ' '.join(commands | options)
 
     @utils.arg('command', metavar='<subcommand>', nargs='?',
-                          help='Display help for <subcommand>')
+               help='Display help for <subcommand>')
     def do_help(self, args):
         """
         Display help about this program or one of its subcommands.
