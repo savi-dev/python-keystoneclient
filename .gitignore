@@ -8,8 +8,13 @@ cover
 *~
 .tox
 AUTHORS
+ChangeLog
 build
 dist
 python_keystoneclient.egg-info
 keystoneclient/versioninfo
 doc/source/api
+
+
+.project
+.pydevproject
