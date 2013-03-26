@@ -14,7 +14,6 @@
 #    under the License.
 import logging
 
-from keystoneclient import access
 from keystoneclient import client
 from keystoneclient import exceptions
 from keystoneclient import service_catalog
@@ -149,13 +148,15 @@ class Client(client.HTTPClient):
         # if we got a response without a service catalog, set the local
         # list of tenants for introspection, and leave to client user
         # to determine what to do. Otherwise, load up the service catalog
-        self.auth_token = self.auth_ref.auth_token
         if self.auth_ref.scoped:
             if self.management_url is None and self.auth_ref.management_url:
                 self.management_url = self.auth_ref.management_url[0]
             self.tenant_name = self.auth_ref.tenant_name
             self.tenant_id = self.auth_ref.tenant_id
             self.user_id = self.auth_ref.user_id
+        else:
+            if self.management_url is None and self.auth_ref.auth_url:
+                self.management_url = self.auth_ref.public_url[0]
         self._extract_service_catalog(self.auth_url, self.auth_ref)
 
     def get_raw_token_from_identity_service(self, auth_url, username=None,
@@ -210,7 +211,8 @@ class Client(client.HTTPClient):
     # associated methods
     def _extract_service_catalog(self, url, body):
         """ Set the client's service catalog from the response data. """
-        self.service_catalog = service_catalog.ServiceCatalog(body)
+        self.service_catalog = service_catalog.ServiceCatalog(
+            body, region_name=self.region_name)
         try:
             sc = self.service_catalog.get_token()
             # Save these since we have them and they'll be useful later
