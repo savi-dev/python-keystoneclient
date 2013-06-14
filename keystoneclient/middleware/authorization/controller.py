@@ -27,12 +27,12 @@ def protected(action='None'):
     """Wraps API calls with attribute based access controls (ABAC)."""
     def decorator(f):
        @functools.wraps(f)
-       def wrapper(self, request):
+       def wrapper(self, request, **kwargs):
            method = request.headers['Enforce']
-           kwargs = provision_attributes()
-           authorization = method(request, action, flatten(kwargs))
+           options = provision_attributes()
+           authorization = method(request, action, flatten(options))
            if  authorization != None:
                return authorization
-           return f(self, request)
+           return f(self, request, **kwargs)
        return wrapper
     return decorator
