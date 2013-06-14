@@ -173,8 +173,8 @@ l
         :raise ServiceError when unable to retrieve token from keystone
 
         """
-        if not self.admin_token:
-            self.admin_token, self.policy = self._request_admin_token()
+       
+        self.admin_token, self.policy = self._request_admin_token()
 
         return self.admin_token, self.policy
 
@@ -297,7 +297,9 @@ l
 
     def get_policy(self):
         token, policy = self.get_admin_token()
-        self.logger.debug("policy %s" % self.mypolicy)
+        self.logger.debug("policy1 %s" % self.mypolicy)
+        self.logger.debug("policy2 %s" % policy)
+        
         if policy is not None:
             if self.mypolicy is not None and self.mypolicy['timestamp'] == policy[0]['timestamp']:
                 return self.mypolicy['blob']
