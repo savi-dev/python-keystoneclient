@@ -149,7 +149,7 @@ class Authorize(object):
         
         policy = self.get_policy()
         self.logger.debug("Fetching policies %s" % policy)
-        self.brain = engine.Brain.load_json(policy, self.logger)
+        self.brain = engine.Brain.load_json(policy, logger=self.logger)
         
         context = request.headers['context']
         self.logger.debug("Fetching context %s" % context)

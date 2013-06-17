@@ -1,9 +1,7 @@
 import functools
 import collections
-from janus.common import logging
 
 
-LOG = logging.getLogger(__name__)
 
 def provision_attributes():
 
