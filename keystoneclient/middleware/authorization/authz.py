@@ -61,7 +61,7 @@ class Authorize(object):
     def __init__(self, app, conf):
         self.conf = conf
         self.app = app
-        self.timestamp =''
+        self.mypolicy=None
         self.logger = logging.getLogger(conf.get('log_name', __name__))
         # where to find the auth service (we use this to validate tokens)
         self.auth_host = self._conf_get('auth_host')
@@ -149,7 +149,7 @@ class Authorize(object):
         
         policy = self.get_policy()
         self.logger.debug("Fetching policies %s" % policy)
-        self.brain = engine.Brain.load_json(policy, self.logger)
+        self.brain = engine.Brain.load_json(policy, logger=self.logger)
         
         context = request.headers['context']
         self.logger.debug("Fetching context %s" % context)
@@ -173,8 +173,8 @@ l
         :raise ServiceError when unable to retrieve token from keystone
 
         """
-        if not self.admin_token:
-            self.admin_token, self.policy = self._request_admin_token()
+       
+        self.admin_token, self.policy = self._request_admin_token()
 
         return self.admin_token, self.policy
 
@@ -297,13 +297,18 @@ l
 
     def get_policy(self):
         token, policy = self.get_admin_token()
-        self.logger.debug("policy %s" % policy[0])
-        if policy is not None and self.timestamp != policy[0]['timestamp']:
+        self.logger.debug("policy1 %s" % self.mypolicy)
+        self.logger.debug("policy2 %s" % policy)
+        
+        if policy is not None:
+            if self.mypolicy is not None and self.mypolicy['timestamp'] == policy[0]['timestamp']:
+                return self.mypolicy['blob']
+            
             fetched_policy = self._fetch_policy(token, policy[0])
             if fetched_policy:
-                self.timestamp = fetched_policy['timestamp']
+                self.mypolicy = fetched_policy
                 return fetched_policy['blob']
-        return None
+        return self.policy['blob']
         
     def _fetch_policy(self, token, policy_meta):
         """ Fetch policy from Keystone """
