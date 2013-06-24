@@ -139,31 +139,19 @@ class Authorize(object):
         self.logger.debug("Printing Identity %s" % context)
         self._add_headers(env, {'X-Authorized': 'NO'})
         self._add_headers(env, {'context':context})
-        self._add_headers(env, {'enforce':self.enforce})
+        self._add_headers(env, {'updateBrain':self.updateBrain})
         return self.app(env, start_response)
 
-    def enforce(self, request, action, kwargs={}):
+    def updateBrain(self, brain):
         self.logger.debug(_('ABAC: Authorizing %s(%s)') % (
         action,
         ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
         
         policy = self.get_policy()
         self.logger.debug("Fetching policies %s" % policy)
-        self.brain = engine.Brain.load_json(policy, logger=self.logger)
+        self.brain = brain.load_json(policy, logger=self.logger)
         
         context = request.headers['context']
-        self.logger.debug("Fetching context %s" % context)
-        result = self.brain._check("rule:%s" % action, {}, context)
-        self.logger.debug("Fetching result %s" % result)
-        if result:
-            return None
-        return self.denied_response(request)
-        """Handle incoming request.
-l
-        Authorize and send downstream on success. Reject request if
-        we can't authorize.
-
-        """
         
 
     def get_admin_token(self):

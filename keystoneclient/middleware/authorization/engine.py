@@ -5,16 +5,10 @@ Created on Jun 10, 2013
 '''
 """Common Policy Engine Implementation"""
 
-import urllib
-import urllib2
 import logging
 
 from keystoneclient.openstack.common import jsonutils
-
 LOG= logging.getLogger(__name__)
-
-class NotAuthorized(Exception):
-    pass
 
 
 _BRAIN = None
@@ -36,17 +30,15 @@ def reset():
     _BRAIN = None
 
 
-def enforce(match_list, target_dict, credentials_dict):
-    
-    global _BRAIN
-    if not _BRAIN:
-        _BRAIN = Brain()
-    if not _BRAIN.check(match_list, target_dict, credentials_dict):
-        raise NotAuthorized()
-
-
 class Brain(object):
     """Implements policy checking."""
+
+    _checks = {}
+
+    @classmethod
+    def _register(cls, name, func):
+        cls._checks[name] = func
+
     @classmethod
     def load_json(cls, data, default_rule=None, logger=None):
         """Init a brain using json instead of a rules dictionary."""
@@ -98,39 +90,55 @@ class Brain(object):
                 return True
         return False
 
-    def _check_rule(self, match, target_dict, cred_dict):
-        """Recursively checks credentials based on the brains rules."""
-        try:
-            new_match_list = self.rules[match]
-        except KeyError:
-            if self.default_rule and match != self.default_rule:
-                new_match_list = ('rule:%s' % self.default_rule,)
-            else:
-                return False
 
-        return self.check(new_match_list, target_dict, cred_dict)
+def register(name, func=None):
+    """
+    Register a function as a policy check.
 
-    def _check_role(self, match, target_dict, cred_dict):
-        """Check that there is a matching role in the cred dict."""
-        LOG.debug("Role %s" % match)
-        return match.lower() in [x.lower() for x in cred_dict['roles']]
-    
-    def _check_tenant(self, match, taget_dict, cred_dict):
-        LOG.debug("Tenant %s" % match)
-        return match.lower() in [x.lower() for x in cred_dict['tenant']]
-    
-    def _check_generic(self, match, target_dict, cred_dict):
-        """Check an individual match.
+    """
 
-        Matches look like:
+    def decorator(func):
+        # Register the function
+        Brain._register(name, func)
+        return func
 
-            tenant:%(tenant_id)s
-            role:compute:admin
+    # If the function is given, do the registration
+    if func:
+        return decorator(func)
 
-        """
+    return decorator
 
-        match = match % target_dict
-        key, value = match.split(':', 1)
-        if key in cred_dict:
-            return value == cred_dict[key]
-        return False
+@register('rule')
+def _check_rule(match, target_dict, cred_dict):
+   """Recursively checks credentials based on the brains rules."""
+   try:
+       new_match_list = self.rules[match]
+   except KeyError:
+       if brain.default_rule and match != brain.default_rule:
+          new_match_list = ('rule:%s' % brain.default_rule,)
+       else:
+          return False          
+
+   return self.check(new_match_list, target_dict, cred_dict)
+
+@register('role')
+def _check_role(self, match, target_dict, cred_dict):
+    """Check that there is a matching role in the cred dict."""
+    LOG.debug("Role %s" % match)
+    return match.lower() in [x.lower() for x in cred_dict['roles']]
+
+@register('tenant')
+def _check_tenant(self, match, taget_dict, cred_dict):
+    LOG.debug("Tenant %s" % match)
+    return match.lower() in [x.lower() for x in cred_dict['tenant']]
+
+
+@register(None)
+def _check_generic(brain, match_kind, match, target_dict, cred_dict):
+    match = match % target_dict
+    if match_kind in cred_dict:
+        return match == unicode(cred_dict[match_kind])
+    return False
+
+
+
