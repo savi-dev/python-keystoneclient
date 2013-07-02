@@ -6,8 +6,6 @@ from keystoneclient.middleware.authorization import engine
 
 register = engine.register
 
-      
-
 def flatten(d, parent_key=''):
     if d == None:
         return {}
@@ -38,10 +36,10 @@ def protected(action='None'):
     def decorator(f):
        @functools.wraps(f)
        def wrapper(self, request, **kwargs):
-           context = request.headers['context']
-           method = request.headers['updateBrain']
-           method(brain)
-           enforce("rule:%s" % action, {}, context)
+#           context = request.headers['context']
+#           method = request.headers['updateBrain']
+#           method(brain)
+#           enforce("rule:%s" % action, {}, context)
            return f(self, request, **kwargs)
        return wrapper
     return decorator
@@ -58,6 +56,10 @@ def denied_response(req):
             return webob.exc.HTTPUnauthorized(request=req)
 
 
+
+engine.init()
+
+brain = engine._BRAIN      
 RESOURCE_ATTRIBUTE_MAP = {}
 RESOURCE_HIERARCHY_MAP = {}
 

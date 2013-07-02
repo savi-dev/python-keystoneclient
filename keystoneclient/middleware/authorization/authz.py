@@ -7,7 +7,7 @@ import stat
 import time
 import webob.exc
 
-from keystoneclient.middleware.authorization import engine
+from keystoneclient.middleware.authorization import engine,context
 from keystoneclient.openstack.common import jsonutils
 
 
@@ -120,22 +120,19 @@ class Authorize(object):
         else:
             return CONF.keystone_policy[name]
 
-    def _build_policy_check_credentials(self, environ):
+    def _build_KeystoneContext(self, environ):
         """Extract the identity from the Keystone auth component."""
         if environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed':
             return
-        roles = []
-        if 'HTTP_X_ROLES' in environ:
-            roles = environ['HTTP_X_ROLES'].split(',')
-        context = {'user': environ.get('HTTP_X_USER_NAME'),
-                    'tenant': (environ.get('HTTP_X_TENANT_ID',None),
-                               environ.get('HTTP_X_TENANT_NAME',None)),
-                    'roles': roles}
-        return context
+        user_id = environ.get('X_USER_ID', environ.get('X_USER'))
+        tenant_id = environ.get('X_TENANT_ID', environ.get('X_TENANT'))
+        roles = [r.strip() for r in environ.get('X_ROLE', '').split(',')]
+        ctx = context.Context(user_id, tenant_id, roles=roles)
+        return ctx
 
     def __call__(self, env, start_response):
         token, policy = self._request_admin_token()
-        context = self._build_policy_check_credentials(env)
+        context = self._build_KeystoneContext(env)
         self.logger.debug("Printing Identity %s" % context)
         self._add_headers(env, {'X-Authorized': 'NO'})
         self._add_headers(env, {'context':context})

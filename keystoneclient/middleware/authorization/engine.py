@@ -14,6 +14,12 @@ LOG= logging.getLogger(__name__)
 _BRAIN = None
 
 
+def init():
+   print "asdasssssssssssss"
+   global _BRAIN
+   if not _BRAIN:
+       _BRAIN = Brain()
+
 def set_brain(brain):
     """Set the brain used by enforce().
 
