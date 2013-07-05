@@ -1,19 +1,22 @@
+import logging
 
+
+LOG=logging.getLogger(__name__)
 
 class Context(object):
       def __init__(self, user_id, tenant_id, is_admin=None,
-                 roles=None, **kwargs):
+                 roles=None, domain_id=None, **kwargs):
         if kwargs:
             LOG.warn(_('Arguments dropped when creating '
                        'context: %s'), kwargs)
-        super(ContextBase, self).__init__(user=user_id, tenant=tenant_id,
-                                          is_admin=is_admin)
         self.roles = roles or []
-        if self.is_admin is None:
+        self.user = user_id
+        self.tenant = tenant_id
+        self.domain = domain_id
+        if is_admin is None:
             self.is_admin = 'admin' in [x.lower() for x in self.roles]
         elif self.is_admin and 'admin' not in [x.lower() for x in self.roles]:
             self.roles.append('admin')
-        self.read_deleted = read_deleted
 
       @property
       def project_id(self):
@@ -35,11 +38,19 @@ class Context(object):
       def user_id(self, user_id):
           self.user = user_id
 
+      @property
+      def domain_id(self):
+          return self.domain
 
+      @domain_id.setter
+      def domain_id(self, domain_id):
+          self.domain=domain_id
+      
       def to_dict(self):
           return {'user_id': self.user_id,
                 'tenant_id': self.tenant_id,
                 'project_id': self.project_id,
+                'domain_id':self.domain_id,
                 'is_admin': self.is_admin,
                 'roles': self.roles
                 }

@@ -1,10 +1,15 @@
 import functools
 import collections
+import logging
 import webob.exc
 
 from keystoneclient.middleware.authorization import engine
 
 register = engine.register
+
+LOG=logging.getLogger(__name__)
+
+_BRAIN=None
 
 def flatten(d, parent_key=''):
     if d == None:
@@ -20,9 +25,6 @@ def flatten(d, parent_key=''):
 
 
 def enforce(match_list, target_dict, credentials_dict):
-    global _BRAIN
-    if not _BRAIN:
-        _BRAIN = engine.Brain()
     if not _BRAIN.check(match_list, target_dict, credentials_dict):
         if exc:
             raise exc(*args, **kwargs)
@@ -36,30 +38,25 @@ def protected(action='None'):
     def decorator(f):
        @functools.wraps(f)
        def wrapper(self, request, **kwargs):
-#           context = request.headers['context']
-#           method = request.headers['updateBrain']
-#           method(brain)
-#           enforce("rule:%s" % action, {}, context)
+           LOG.debug(_('ABAC: Authorizing %s(%s)') % (
+               action,
+                ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
+           context = request.headers['context']
+           method = request.headers['updateBrain']
+           policy=method()
+           global _BRAIN
+           if not _BRAIN:
+              _BRAIN=engine.Brain()
+           _BRAIN=_BRAIN.load_json(policy) 
+           LOG.debug("Brain Policy %s" % _BRAIN.rules)
+           match_list = ("rule:%s" % action,)
+           if not _BRAIN.check(match_list, {}, context):
+              return webob.exc.HTTPUnauthorized(request=request)
            return f(self, request, **kwargs)
        return wrapper
     return decorator
 
-def denied_response(req):
-        """Deny WSGI Response.
 
-        Returns a standard WSGI response callable with the status of 403 or 401
-        depending on whether the REMOTE_USER is set or not.
-        """
-        if req.remote_user:
-            return webob.exc.HTTPForbidden(request=req)
-        else:
-            return webob.exc.HTTPUnauthorized(request=req)
-
-
-
-engine.init()
-
-brain = engine._BRAIN      
 RESOURCE_ATTRIBUTE_MAP = {}
 RESOURCE_HIERARCHY_MAP = {}
 

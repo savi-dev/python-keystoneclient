@@ -61,7 +61,7 @@ class Authorize(object):
     def __init__(self, app, conf):
         self.conf = conf
         self.app = app
-        self.mypolicy=None
+        self.current_policy=None
         self.logger = logging.getLogger(conf.get('log_name', __name__))
         # where to find the auth service (we use this to validate tokens)
         self.auth_host = self._conf_get('auth_host')
@@ -124,9 +124,9 @@ class Authorize(object):
         """Extract the identity from the Keystone auth component."""
         if environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed':
             return
-        user_id = environ.get('X_USER_ID', environ.get('X_USER'))
-        tenant_id = environ.get('X_TENANT_ID', environ.get('X_TENANT'))
-        roles = [r.strip() for r in environ.get('X_ROLE', '').split(',')]
+        user_id = environ.get('HTTP_X_USER_ID', environ.get('HTTP_X_USER'))
+        tenant_id = environ.get('HTTP_X_TENANT_ID', environ.get('HTTP_X_TENANT_NAME'))
+        roles = [r.strip() for r in environ.get('HTTP_X_ROLES', '').split(',')]
         ctx = context.Context(user_id, tenant_id, roles=roles)
         return ctx
 
@@ -139,16 +139,13 @@ class Authorize(object):
         self._add_headers(env, {'updateBrain':self.updateBrain})
         return self.app(env, start_response)
 
-    def updateBrain(self, brain):
-        self.logger.debug(_('ABAC: Authorizing %s(%s)') % (
-        action,
-        ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
+    def updateBrain(self):
+        self.logger.debug('Updating Policy')
         
         policy = self.get_policy()
-        self.logger.debug("Fetching policies %s" % policy)
-        self.brain = brain.load_json(policy, logger=self.logger)
-        
-        context = request.headers['context']
+        #self.logger.debug("Fetching policies %s" % policy)
+  
+        return policy
         
 
     def get_admin_token(self):
@@ -282,18 +279,15 @@ class Authorize(object):
 
     def get_policy(self):
         token, policy = self.get_admin_token()
-        self.logger.debug("policy1 %s" % self.mypolicy)
-        self.logger.debug("policy2 %s" % policy)
-        
         if policy is not None:
-            if self.mypolicy is not None and self.mypolicy['timestamp'] == policy[0]['timestamp']:
-                return self.mypolicy['blob']
+            if self.current_policy is not None and self.current_policy['timestamp'] == policy[0]['timestamp']:
+                return self.current_policy['blob']
             
             fetched_policy = self._fetch_policy(token, policy[0])
             if fetched_policy:
-                self.mypolicy = fetched_policy
+                self.current_policy = fetched_policy
                 return fetched_policy['blob']
-        return self.policy['blob']
+        return None
         
     def _fetch_policy(self, token, policy_meta):
         """ Fetch policy from Keystone """
@@ -301,7 +295,6 @@ class Authorize(object):
         response, data = self._json_request('GET',
                                             '/v2.0/policies/%s' % policy_meta['id'],
                                             additional_headers=headers)
-        self.logger.debug("wwwwwwwwwwwww %s" % data['policy']['blob'])
 
         if response.status == 200:
             return data['policy']
