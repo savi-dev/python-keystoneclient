@@ -175,10 +175,17 @@ def _check_role(brain, match_kind, match, target_dict, context):
     LOG.debug("Role %s" % match)
     return match.lower() in [x.lower() for x in context.roles]
 
-@register('tenant')
-def _check_tenant(brain, match_kind, match, taget_dict, context):
-    LOG.debug("Tenant %s" % match)
+@register('tenant_id')
+def _check_tenant_id(brain, match_kind, match, taget_dict, context):
+    LOG.debug("Checking Tenant Id%s" % match)
     return match.lower() == context.tenant_id.lower()
+
+@register('tenant')
+def _check_tenant_id(brain, match_kind, match, taget_dict, context):
+    LOG.debug("Checking Tenant Name %s" % match)
+    result= match.lower() == context.tenant.lower()
+    return result
+
 
 @register('domain')
 def _check_domain(brain, match_kind, match, target_dict, context):
@@ -192,4 +199,36 @@ def _check_generic(brain, match_kind, match, target_dict, context):
     if match_kind in cred_dict:
         return match == unicode(cred_dict[match_kind])
     return False
+
+@register('field')
+class FieldCheck(policy.Check):
+    def __init__(self, kind, match):
+        # Process the match
+        resource, field_value = match.split(':', 1)
+        field, value = field_value.split('=', 1)
+
+        super(FieldCheck, self).__init__(kind, '%s:%s:%s' %
+                                         (resource, field, value))
+
+        # Value might need conversion - we need help from the attribute map
+        try:
+            attr = attributes.RESOURCE_ATTRIBUTE_MAP[resource][field]
+            conv_func = attr['convert_to']
+        except KeyError:
+            conv_func = lambda x: x
+
+        self.field = field
+        self.value = conv_func(value)
+
+    def __call__(self, target_dict, cred_dict):
+        target_value = target_dict.get(self.field)
+        # target_value might be a boolean, explicitly compare with None
+        if target_value is None:
+            LOG.debug(_("Unable to find requested field: %(field)s in "
+                        "target: %(target_dict)s"),
+                      {'field': self.field,
+                       'target_dict': target_dict})
+            return False
+
+        return target_value == self.value
 

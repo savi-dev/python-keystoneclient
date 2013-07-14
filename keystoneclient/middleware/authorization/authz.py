@@ -122,12 +122,16 @@ class Authorize(object):
 
     def _build_KeystoneContext(self, environ):
         """Extract the identity from the Keystone auth component."""
+        self.logger.debug("VVV %s" % environ.get('HTTP_X_TENANT', None))
         if environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed':
             return
-        user_id = environ.get('HTTP_X_USER_ID', environ.get('HTTP_X_USER'))
-        tenant_id = environ.get('HTTP_X_TENANT_ID', environ.get('HTTP_X_TENANT_NAME'))
+        user_id = environ.get('HTTP_X_USER_ID', None)
+        user_name =  environ.get('HTTP_X_USER', None)
+        tenant_id = environ.get('HTTP_X_TENANT_ID', None)
+        tenant_name = environ.get('HTTP_X_TENANT', None)
         roles = [r.strip() for r in environ.get('HTTP_X_ROLES', '').split(',')]
-        ctx = context.Context(user_id, tenant_id, roles=roles)
+        ctx = context.Context(user_id, tenant_id, user_name = user_name,
+                tenant_name = tenant_name, roles=roles)
         return ctx
 
     def __call__(self, env, start_response):
