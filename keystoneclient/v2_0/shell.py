@@ -239,11 +239,8 @@ def do_service_delete(kc, args):
 
 @utils.arg('name', metavar='<service-name>', help='Service Name to show ID')
 def do_service_id(kc, args):
-    services = kc.services.list()
-    for service in services:
-        if getattr(service,'name','') == args.name:
-           print getattr(service,'id','')
-           return
+    service_id = kc.services.get_service(args.name)
+    print service_id
 
 def do_role_list(kc, args):
     """List all roles"""
@@ -453,7 +450,7 @@ def do_endpoint_list(kc, args):
     """List configured service endpoints"""
     endpoints = kc.endpoints.list()
     utils.print_list(endpoints,
-                     ['id', 'region', 'publicurl', 'internalurl', 'adminurl'])
+                     ['id','service_id', 'region', 'publicurl', 'internalurl', 'adminurl'])
 
 
 @utils.arg('--region', metavar='<endpoint-region>',
