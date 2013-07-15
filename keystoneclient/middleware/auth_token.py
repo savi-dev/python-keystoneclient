@@ -150,6 +150,7 @@ import json
 import logging
 import os
 import stat
+import tempfile
 import time
 import urllib
 import webob.exc
@@ -211,21 +212,22 @@ opts = [
     cfg.StrOpt('cache', default=None),   # env key for the swift cache
     cfg.StrOpt('certfile'),
     cfg.StrOpt('keyfile'),
-    cfg.StrOpt('signing_dir',
-               default=os.path.expanduser('~/keystone-signing')),
-    cfg.ListOpt('memcache_servers'),
+    cfg.StrOpt('signing_dir'),
+    cfg.ListOpt('memcached_servers', deprecated_name='memcache_servers'),
     cfg.IntOpt('token_cache_time', default=300),
     cfg.IntOpt('revocation_cache_time', default=1),
     cfg.StrOpt('memcache_security_strategy', default=None),
-    cfg.StrOpt('memcache_secret_key', default=None, secret=True)
+    cfg.StrOpt('memcache_secret_key', default=None, secret=True),
+    cfg.ListOpt('remote_users', default=None)
 ]
 CONF.register_opts(opts, group='keystone_authtoken')
 
 LIST_OF_VERSIONS_TO_ATTEMPT = ['v2.0', 'v3.0']
+CACHE_KEY_TEMPLATE = 'tokens/%s'
 
 
 def will_expire_soon(expiry):
-    """ Determines if expiration is about to occur.
+    """Determines if expiration is about to occur.
 
     :param expiry: a datetime of the expected expiration
     :returns: boolean : true if expiration is within 30 seconds
@@ -292,19 +294,29 @@ class AuthProtocol(object):
         self.cert_file = self._conf_get('certfile')
         self.key_file = self._conf_get('keyfile')
 
-        #signing
+        #REMOTE USER
+        self.remote_users = self._conf_get('remote_users')  
+      
+        # signing
         self.signing_dirname = self._conf_get('signing_dir')
+        if self.signing_dirname is None:
+            self.signing_dirname = tempfile.mkdtemp(prefix='keystone-signing-')
         self.LOG.info('Using %s as cache directory for signing certificate' %
                       self.signing_dirname)
-        if (os.path.exists(self.signing_dirname) and
-                not os.access(self.signing_dirname, os.W_OK)):
-                raise ConfigurationError("unable to access signing dir %s" %
-                                         self.signing_dirname)
-
-        if not os.path.exists(self.signing_dirname):
-            os.makedirs(self.signing_dirname)
-        #will throw IOError  if it cannot change permissions
-        os.chmod(self.signing_dirname, stat.S_IRWXU)
+        if os.path.exists(self.signing_dirname):
+            if not os.access(self.signing_dirname, os.W_OK):
+                raise ConfigurationError(
+                    'unable to access signing_dir %s' % self.signing_dirname)
+            if os.stat(self.signing_dirname).st_uid != os.getuid():
+                self.LOG.warning(
+                    'signing_dir is not owned by %s' % os.getuid())
+            current_mode = stat.S_IMODE(os.stat(self.signing_dirname).st_mode)
+            if current_mode != stat.S_IRWXU:
+                self.LOG.warning(
+                    'signing_dir mode is %s instead of %s' %
+                    (oct(current_mode), oct(stat.S_IRWXU)))
+        else:
+            os.makedirs(self.signing_dirname, stat.S_IRWXU)
 
         val = '%s/signing_cert.pem' % self.signing_dirname
         self.signing_cert_file_name = val
@@ -323,7 +335,6 @@ class AuthProtocol(object):
 
         # Token caching via memcache
         self._cache = None
-        self._use_keystone_cache = False
         self._cache_initialized = False    # cache already initialzied?
         # memcache value treatment, ENCRYPT or MAC
         self._memcache_security_strategy = \
@@ -356,7 +367,8 @@ class AuthProtocol(object):
 
     def _init_cache(self, env):
         cache = self._conf_get('cache')
-        memcache_servers = self._conf_get('memcache_servers')
+        memcache_servers = self._conf_get('memcached_servers')
+
         if cache and env.get(cache, None) is not None:
             # use the cache from the upstream filter
             self.LOG.info('Using %s memcache for caching token', cache)
@@ -364,7 +376,6 @@ class AuthProtocol(object):
         else:
             # use Keystone memcache
             self._cache = memorycache.get_client(memcache_servers)
-            self._use_keystone_cache = True
         self._cache_initialized = True
 
     def _conf_get(self, name):
@@ -375,7 +386,7 @@ class AuthProtocol(object):
             return CONF.keystone_authtoken[name]
 
     def _choose_api_version(self):
-        """ Determine the api version that we should use."""
+        """Determine the api version that we should use."""
 
         # If the configuration specifies an auth_version we will just
         # assume that is correct and use it.  We could, of course, check
@@ -410,7 +421,10 @@ class AuthProtocol(object):
     def _get_supported_versions(self):
         versions = []
         response, data = self._json_request('GET', '/')
-        if response.status != 300:
+        if response.status == 501:
+            self.LOG.warning("Old keystone installation found...assuming v2.0")
+            versions.append("v2.0")
+        elif response.status != 300:
             self.LOG.error('Unable to get version info from keystone: %s' %
                            response.status)
             raise ServiceError('Unable to get version info from keystone')
@@ -435,15 +449,18 @@ class AuthProtocol(object):
         we can't authenticate.
 
         """
-        self.LOG.debug('Authenticating user token')
 
         # initialize memcache if we haven't done so
         if not self._cache_initialized:
             self._init_cache(env)
-
+        
+        self.LOG.debug('Authenticating user token')
         try:
             self._remove_auth_headers(env)
-            user_token = self._get_user_token_from_header(env)
+            if self._authenticate_remote_user(env.get('REMOTE_ADDR')):
+               user_token = self.get_admin_token()
+            else:
+               user_token = self._get_user_token_from_header(env)
             token_info = self._validate_user_token(user_token)
             env['keystone.token_info'] = token_info
             user_headers = self._build_user_headers(token_info)
@@ -465,6 +482,13 @@ class AuthProtocol(object):
             resp = webob.exc.HTTPServiceUnavailable()
             return resp(env, start_response)
 
+    def _authenticate_remote_user(self, src_addr):
+        if self.remote_users is not None:
+           if src_addr in self.remote_users:
+              self.LOG.debug("Remote User Authentication")
+              return True
+        return False
+ 
     def _remove_auth_headers(self, env):
         """Remove headers so a user can't fake authentication.
 
@@ -690,7 +714,8 @@ class AuthProtocol(object):
                 data = json.loads(verified)
             else:
                 data = self.verify_uuid_token(user_token, retry)
-            self._cache_put(token_id, data)
+            expires = self._confirm_token_not_expired(data)
+            self._cache_put(token_id, data, expires)
             return data
         except Exception as e:
             self.LOG.debug('Token validation failure.', exc_info=True)
@@ -836,111 +861,111 @@ class AuthProtocol(object):
         env_key = self._header_to_env_var(key)
         return env.get(env_key, default)
 
-    def _protect_cache_value(self, token, data):
-        """ Encrypt or sign data if necessary. """
-        try:
-            if self._memcache_security_strategy == 'ENCRYPT':
-                return memcache_crypt.encrypt_data(token,
-                                                   self._memcache_secret_key,
-                                                   data)
-            elif self._memcache_security_strategy == 'MAC':
-                return memcache_crypt.sign_data(token, data)
-            else:
-                return data
-        except:
-            msg = 'Failed to encrypt/sign cache data.'
-            self.LOG.exception(msg)
-            return data
-
-    def _unprotect_cache_value(self, token, data):
-        """ Decrypt or verify signed data if necessary. """
-        if data is None:
-            return data
-
-        try:
-            if self._memcache_security_strategy == 'ENCRYPT':
-                return memcache_crypt.decrypt_data(token,
-                                                   self._memcache_secret_key,
-                                                   data)
-            elif self._memcache_security_strategy == 'MAC':
-                return memcache_crypt.verify_signed_data(token, data)
-            else:
-                return data
-        except:
-            msg = 'Failed to decrypt/verify cache data.'
-            self.LOG.exception(msg)
-            # this should have the same effect as data not found in cache
-            return None
-
-    def _get_cache_key(self, token):
-        """ Return the cache key.
-
-        Do not use clear token as key if memcache protection is on.
-
-        """
-        htoken = token
-        if self._memcache_security_strategy in ('ENCRYPT', 'MAC'):
-            derv_token = token + self._memcache_secret_key
-            htoken = memcache_crypt.hash_data(derv_token)
-        return 'tokens/%s' % htoken
-
-    def _cache_get(self, token):
+    def _cache_get(self, token, ignore_expires=False):
         """Return token information from cache.
 
         If token is invalid raise InvalidUserToken
         return token only if fresh (not expired).
         """
+
         if self._cache and token:
-            key = self._get_cache_key(token)
-            cached = self._cache.get(key)
-            cached = self._unprotect_cache_value(token, cached)
+            if self._memcache_security_strategy is None:
+                key = CACHE_KEY_TEMPLATE % token
+                serialized = self._cache.get(key)
+            else:
+                keys = memcache_crypt.derive_keys(
+                    token,
+                    self._memcache_secret_key,
+                    self._memcache_security_strategy)
+                cache_key = CACHE_KEY_TEMPLATE % (
+                    memcache_crypt.get_cache_key(keys))
+                raw_cached = self._cache.get(cache_key)
+                try:
+                    # unprotect_data will return None if raw_cached is None
+                    serialized = memcache_crypt.unprotect_data(keys,
+                                                               raw_cached)
+                except Exception:
+                    msg = 'Failed to decrypt/verify cache data'
+                    self.LOG.exception(msg)
+                    # this should have the same effect as data not
+                    # found in cache
+                    serialized = None
+
+            if serialized is None:
+                return None
+
+            # Note that 'invalid' and (data, expires) are the only
+            # valid types of serialized cache entries, so there is not
+            # a collision with json.loads(serialized) == None.
+            cached = json.loads(serialized)
             if cached == 'invalid':
                 self.LOG.debug('Cached Token %s is marked unauthorized', token)
                 raise InvalidUserToken('Token authorization failed')
-            if cached:
-                data, expires = cached
-                if time.time() < float(expires):
-                    self.LOG.debug('Returning cached token %s', token)
-                    return data
-                else:
-                    self.LOG.debug('Cached Token %s seems expired', token)
 
-    def _cache_store(self, token, data, expires=None):
-        """ Store value into memcache. """
-        key = self._get_cache_key(token)
-        data = self._protect_cache_value(token, data)
-        data_to_store = data
-        if expires:
-            data_to_store = (data, expires)
-        # we need to special-case set() because of the incompatibility between
-        # Swift MemcacheRing and python-memcached. See
-        # https://bugs.launchpad.net/swift/+bug/1095730
-        if self._use_keystone_cache:
-            self._cache.set(key,
+            data, expires = cached
+            if ignore_expires or time.time() < float(expires):
+                self.LOG.debug('Returning cached token %s', token)
+                return data
+            else:
+                self.LOG.debug('Cached Token %s seems expired', token)
+
+    def _cache_store(self, token, data):
+        """Store value into memcache.
+
+        data may be the string 'invalid' or a tuple like (data, expires)
+
+        """
+        serialized_data = json.dumps(data)
+        if self._memcache_security_strategy is None:
+            cache_key = CACHE_KEY_TEMPLATE % token
+            data_to_store = serialized_data
+        else:
+            keys = memcache_crypt.derive_keys(
+                token,
+                self._memcache_secret_key,
+                self._memcache_security_strategy)
+            cache_key = CACHE_KEY_TEMPLATE % memcache_crypt.get_cache_key(keys)
+            data_to_store = memcache_crypt.protect_data(keys, serialized_data)
+
+        # Historically the swift cache conection used the argument
+        # timeout= for the cache timeout, but this has been unified
+        # with the official python memcache client with time= since
+        # grizzly, we still need to handle folsom for a while until
+        # this could get removed.
+        try:
+            self._cache.set(cache_key,
                             data_to_store,
                             time=self.token_cache_time)
-        else:
-            self._cache.set(key,
+        except(TypeError):
+            self._cache.set(cache_key,
                             data_to_store,
                             timeout=self.token_cache_time)
 
-    def _cache_put(self, token, data):
-        """ Put token data into the cache.
+    def _confirm_token_not_expired(self, data):
+        if not data:
+            raise InvalidUserToken('Token authorization failed')
+        if self._token_is_v2(data):
+            timestamp = data['access']['token']['expires']
+        elif self._token_is_v3(data):
+            timestamp = data['token']['expires_at']
+        else:
+            raise InvalidUserToken('Token authorization failed')
+        expires = timeutils.parse_isotime(timestamp).strftime('%s')
+        if time.time() >= float(expires):
+            self.LOG.debug('Token expired a %s', timestamp)
+            raise InvalidUserToken('Token authorization failed')
+        return expires
+
+    def _cache_put(self, token, data, expires):
+        """Put token data into the cache.
 
         Stores the parsed expire date in cache allowing
         quick check of token freshness on retrieval.
+
         """
-        if self._cache and data:
-            if self._token_is_v2(data):
-                timestamp = data['access']['token']['expires']
-            elif self._token_is_v3(data):
-                timestamp = data['token']['expires']
-            else:
-                self.LOG.error('invalid token format')
-                return
-            expires = timeutils.parse_isotime(timestamp).strftime('%s')
-            self.LOG.debug('Storing %s token in memcache', token)
-            self._cache_store(token, data, expires)
+        if self._cache:
+                self.LOG.debug('Storing %s token in memcache', token)
+                self._cache_store(token, (data, expires))
 
     def _cache_store_invalid(self, token):
         """Store invalid token in cache."""
