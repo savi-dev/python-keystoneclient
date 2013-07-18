@@ -13,6 +13,16 @@ LOG=logging.getLogger(__name__)
 
 _BRAIN=None
 
+
+def init(updateMethod):
+    policy=updateMethod()
+    global _BRAIN
+    if not _BRAIN:
+       _BRAIN=engine.Brain()
+    _BRAIN=_BRAIN.load_json(policy)
+    LOG.debug("Brain Policy %s" % _BRAIN.rules)
+
+
 def flatten(d, parent_key=''):
     if d == None:
         return {}
@@ -33,55 +43,10 @@ def _is_attribute_explicitly_set(attribute_name, resource, target):
             target[attribute_name] != resource[attribute_name]['default'])
 
 def _build_target(action, original_target, context):
-    """Augment dictionary of target attributes for policy engine.
-
-    This routine adds to the dictionary attributes belonging to the
-    "parent" resource of the targeted one.
-    """
-    target = original_target.copy()
-    resource, _a = get_resource_and_action(action)
-    hierarchy_info = attributes.RESOURCE_HIERARCHY_MAP.get(resource, None)
-    if hierarchy_info and plugin:
-        # use the 'singular' version of the resource name
-        parent_resource = hierarchy_info['parent'][:-1]
-        parent_id = hierarchy_info['identified_by']
-        f = getattr(plugin, 'get_%s' % parent_resource)
-        # f *must* exist, if not found it is better to let quantum explode
-        # Note: we do not use admin context
-        data = f(context, target[parent_id], fields=['tenant_id'])
-        target['%s_tenant_id' % parent_resource] = data['tenant_id']
-    return target
+   pass
 
 def _build_match_rule(action, target):
-    """Create the rule to match for a given action.
-
-    The policy rule to be matched is built in the following way:
-    1) add entries for matching permission on objects
-    2) add an entry for the specific action (e.g.: create_network)
-    3) add an entry for attributes of a resource for which the action
-       is being executed (e.g.: create_network:shared)
-
-    """
-
-    match_rule = policy.RuleCheck('rule', action)
-    resource, is_write = get_resource_and_action(action)
-    if is_write:
-        # assigning to variable with short name for improving readability
-        res_map = attributes.RESOURCE_ATTRIBUTE_MAP
-        if resource in res_map:
-            for attribute_name in res_map[resource]:
-                if _is_attribute_explicitly_set(attribute_name,
-                                                res_map[resource],
-                                                target):
-                    attribute = res_map[resource][attribute_name]
-                    if 'enforce_policy' in attribute and is_write:
-                        attr_rule = policy.RuleCheck('rule', '%s:%s' %
-                                                     (action, attribute_name))
-                        match_rule = policy.AndCheck([match_rule, attr_rule])
-
-    return match_rule
-
-
+   pass
 
 def protected(action='None'):
     """Wraps API calls with attribute based access controls (ABAC)."""
@@ -93,12 +58,7 @@ def protected(action='None'):
                 ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
            context = request.headers['context']
            method = request.headers['updateBrain']
-           policy=method()
-           global _BRAIN
-           if not _BRAIN:
-              _BRAIN=engine.Brain()
-           _BRAIN=_BRAIN.load_json(policy) 
-           LOG.debug("Brain Policy %s" % _BRAIN.rules)
+           init(method)
            match_list = ("rule:%s" % action,)
            if not _BRAIN.check(match_list, {}, context):
               return webob.exc.HTTPUnauthorized(request=request)
@@ -106,6 +66,33 @@ def protected(action='None'):
        return wrapper
     return decorator
 
+
+class filter:
+    def __init__(self, context, action):
+        self.credentials = context.to_dict()
+        self.match_rule = ("rule:%s" % action,)
+
+    def __call__(self, obj):
+        return _BRAIN.check(self.match_rule, obj, self.credentials)
+
+def filterprotected(action):
+    """Wraps filtered API calls with  Attribute Based access controls (ABAC)."""
+
+    def _filterprotected(f):
+        @functools.wraps(f)
+        def wrapper(self, request, **kwargs):
+            filters = None
+            if not context['is_admin']:
+                context = request.headers['context']
+                method = request.headers['updateBrain']
+                init(method)
+                LOG.debug(_('ABAC: Creating Filter'))
+                _filter = filter(context, action)
+            else:
+                LOG.warning(_('ABAC: Bypassing authorization'))
+            return f(self, request, _filter, **kwargs)
+        return wrapper
+    return _filterprotected
 
 RESOURCE_ATTRIBUTE_MAP = {}
 RESOURCE_HIERARCHY_MAP = {}

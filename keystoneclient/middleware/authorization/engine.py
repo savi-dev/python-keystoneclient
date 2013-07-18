@@ -46,7 +46,6 @@ class Brain(object):
     def __init__(self, rules=None, default_rule=None):
         self.rules = rules or {}
         self.default_rule = default_rule
-        LOG.debug("RRRRRRRRRRRRRRRRRRRR %s" % rules)
         
 
     def add_rule(self, key, match):
@@ -141,6 +140,10 @@ class TrueCheck(BaseCheck):
     def __call__(self, target, cred):
         return True
 
+class Check(BaseCheck):
+    def __init__(self, kind, match):
+        self.kind = kind
+        self.match = match
 
 def register(name, func=None):
     """
@@ -201,7 +204,7 @@ def _check_generic(brain, match_kind, match, target_dict, context):
     return False
 
 @register('field')
-class FieldCheck(policy.Check):
+class FieldCheck(Check):
     def __init__(self, kind, match):
         # Process the match
         resource, field_value = match.split(':', 1)
