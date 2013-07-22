@@ -7,7 +7,7 @@ import stat
 import time
 import webob.exc
 
-from keystoneclient.middleware.authorization import engine
+from keystoneclient.middleware.authorization import engine,context
 from keystoneclient.openstack.common import jsonutils
 
 
@@ -61,7 +61,7 @@ class Authorize(object):
     def __init__(self, app, conf):
         self.conf = conf
         self.app = app
-        self.mypolicy=None
+        self.current_policy=None
         self.logger = logging.getLogger(conf.get('log_name', __name__))
         # where to find the auth service (we use this to validate tokens)
         self.auth_host = self._conf_get('auth_host')
@@ -120,50 +120,36 @@ class Authorize(object):
         else:
             return CONF.keystone_policy[name]
 
-    def _build_policy_check_credentials(self, environ):
+    def _build_KeystoneContext(self, environ):
         """Extract the identity from the Keystone auth component."""
+        self.logger.debug("VVV %s" % environ.get('HTTP_X_TENANT', None))
         if environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed':
             return
-        roles = []
-        if 'HTTP_X_ROLES' in environ:
-            roles = environ['HTTP_X_ROLES'].split(',')
-        context = {'user': environ.get('HTTP_X_USER_NAME'),
-                    'tenant': (environ.get('HTTP_X_TENANT_ID',None),
-                               environ.get('HTTP_X_TENANT_NAME',None)),
-                    'roles': roles}
-        return context
+        user_id = environ.get('HTTP_X_USER_ID', None)
+        user_name =  environ.get('HTTP_X_USER', None)
+        tenant_id = environ.get('HTTP_X_TENANT_ID', None)
+        tenant_name = environ.get('HTTP_X_TENANT', None)
+        roles = [r.strip() for r in environ.get('HTTP_X_ROLES', '').split(',')]
+        ctx = context.Context(user_id, tenant_id, user_name = user_name,
+                tenant_name = tenant_name, roles=roles)
+        return ctx
 
     def __call__(self, env, start_response):
         token, policy = self._request_admin_token()
-        context = self._build_policy_check_credentials(env)
+        context = self._build_KeystoneContext(env)
         self.logger.debug("Printing Identity %s" % context)
         self._add_headers(env, {'X-Authorized': 'NO'})
         self._add_headers(env, {'context':context})
-        self._add_headers(env, {'enforce':self.enforce})
+        self._add_headers(env, {'updateBrain':self.updateBrain})
         return self.app(env, start_response)
 
-    def enforce(self, request, action, kwargs={}):
-        self.logger.debug(_('ABAC: Authorizing %s(%s)') % (
-        action,
-        ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
+    def updateBrain(self):
+        self.logger.debug('Updating Policy')
         
         policy = self.get_policy()
-        self.logger.debug("Fetching policies %s" % policy)
-        self.brain = engine.Brain.load_json(policy, logger=self.logger)
-        
-        context = request.headers['context']
-        self.logger.debug("Fetching context %s" % context)
-        result = self.brain._check("rule:%s" % action, {}, context)
-        self.logger.debug("Fetching result %s" % result)
-        if result:
-            return None
-        return self.denied_response(request)
-        """Handle incoming request.
-l
-        Authorize and send downstream on success. Reject request if
-        we can't authorize.
-
-        """
+        #self.logger.debug("Fetching policies %s" % policy)
+  
+        return policy
         
 
     def get_admin_token(self):
@@ -297,18 +283,15 @@ l
 
     def get_policy(self):
         token, policy = self.get_admin_token()
-        self.logger.debug("policy1 %s" % self.mypolicy)
-        self.logger.debug("policy2 %s" % policy)
-        
         if policy is not None:
-            if self.mypolicy is not None and self.mypolicy['timestamp'] == policy[0]['timestamp']:
-                return self.mypolicy['blob']
+            if self.current_policy is not None and self.current_policy['timestamp'] == policy[0]['timestamp']:
+                return self.current_policy['blob']
             
             fetched_policy = self._fetch_policy(token, policy[0])
             if fetched_policy:
-                self.mypolicy = fetched_policy
+                self.current_policy = fetched_policy
                 return fetched_policy['blob']
-        return self.policy['blob']
+        return None
         
     def _fetch_policy(self, token, policy_meta):
         """ Fetch policy from Keystone """
@@ -316,7 +299,6 @@ l
         response, data = self._json_request('GET',
                                             '/v2.0/policies/%s' % policy_meta['id'],
                                             additional_headers=headers)
-        self.logger.debug("wwwwwwwwwwwww %s" % data['policy']['blob'])
 
         if response.status == 200:
             return data['policy']
