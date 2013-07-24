@@ -9,17 +9,17 @@ from keystoneclient.middleware.authorization import engine
 
 register = engine.register
 
-LOG=logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
-_BRAIN=None
+_BRAIN = None
 
 
 def init(updateMethod):
-    policy=updateMethod()
+    policy = updateMethod()
     global _BRAIN
     if not _BRAIN:
-       _BRAIN=engine.Brain()
-    _BRAIN=_BRAIN.load_json(policy)
+       _BRAIN = engine.Brain()
+    _BRAIN = _BRAIN.load_json(policy)
     LOG.debug("Brain Policy %s" % _BRAIN.rules)
 
 
@@ -57,6 +57,8 @@ def protected(action='None'):
                action,
                 ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
            context = request.headers['context']
+           if context is None:
+               return f(self, request, **kwargs)
            method = request.headers['updateBrain']
            init(method)
            match_list = ("rule:%s" % action,)
@@ -69,10 +71,11 @@ def protected(action='None'):
 
 class filter:
     def __init__(self, context, action):
-        self.credentials = context.to_dict()
+        self.credentials = context
         self.match_rule = ("rule:%s" % action,)
 
     def __call__(self, obj):
+        LOG.debug("adad %s" % obj)
         return _BRAIN.check(self.match_rule, obj, self.credentials)
 
 def filterprotected(action):
@@ -81,8 +84,9 @@ def filterprotected(action):
     def _filterprotected(f):
         @functools.wraps(f)
         def wrapper(self, request, **kwargs):
-            filters = None
-            if not context['is_admin']:
+            _filter = None
+            context = request.headers['context']
+            if context and context.tenant != "admin":
                 context = request.headers['context']
                 method = request.headers['updateBrain']
                 init(method)
@@ -96,5 +100,4 @@ def filterprotected(action):
 
 RESOURCE_ATTRIBUTE_MAP = {}
 RESOURCE_HIERARCHY_MAP = {}
-
 
