@@ -1,3 +1,4 @@
+import getpass
 import uuid
 import hashlib
 
@@ -142,3 +143,17 @@ def hash_signed_token(signed_text):
     hash_ = hashlib.md5()
     hash_.update(signed_text)
     return hash_.hexdigest()
+
+def prompt_for_password():
+    if not (hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()):
+        return
+
+    while True:
+        try:
+            new_passwd = getpass.getpass('New Password: ')
+            rep_passwd = getpass.getpass('Repeat New Password: ')
+            if new_passwd == rep_passwd:
+                return new_passwd
+        except EOFError:
+            return
+
