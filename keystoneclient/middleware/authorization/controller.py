@@ -52,7 +52,7 @@ def protected(action='None'):
     """Wraps API calls with attribute based access controls (ABAC)."""
     def decorator(f):
        @functools.wraps(f)
-       def wrapper(self, request, **kwargs):
+       def wrapper(self, request, *args, **kwargs):
            LOG.debug(_('ABAC: Authorizing %s(%s)') % (
                action,
                 ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
@@ -83,7 +83,7 @@ def filterprotected(action):
 
     def _filterprotected(f):
         @functools.wraps(f)
-        def wrapper(self, request, **kwargs):
+        def wrapper(self, request, *args, **kwargs):
             _filter = None
             context = request.headers['context']
             if context and context.tenant != "admin":
