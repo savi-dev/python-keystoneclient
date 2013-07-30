@@ -42,7 +42,7 @@ def do_user_get(kc, args):
 
 @utils.arg('--name', metavar='<user-name>', required=True,
            help='New user name (must be unique)')
-@utils.arg('--tenant-id', metavar='<tenant-id>', 
+@utils.arg('--tenant-id', metavar='<tenant-id>',
            help='New user default tenant')
 @utils.arg('--tenant_id', help=argparse.SUPPRESS)
 @utils.arg('--pass', metavar='<pass>', dest='passwd',
@@ -145,6 +145,10 @@ def do_tenant_list(kc, args):
     tenants = kc.tenants.list()
     utils.print_list(tenants, ['id', 'name', 'enabled'])
 
+def do_user_tenant_list(kc, args):
+    """List all tenants"""
+    tenants = kc.tenants.list(management=False)
+    utils.print_list(tenants, ['id', 'name', 'enabled'])
 
 @utils.arg('tenant', metavar='<tenant>',
            help='Name or ID of tenant to display')
@@ -490,7 +494,7 @@ def do_endpoint_delete(kc, args):
 def do_token_get(kc, args):
     """Display the current user token"""
     utils.print_dict(kc.service_catalog.get_token())
-    
+
 @utils.arg('--policy', metavar='<policy-blob>', required=True,
            help='File contains the policy')
 @utils.arg('--service', metavar='<service-id>',
@@ -524,4 +528,4 @@ def do_policy_list(kc, args):
     """Display Policies associated with a tenant"""
     policies = kc.policies.list()
     utils.print_list(policies, ['id', 'type', 'service_id'],
-                     order_by='id') 
+                     order_by='id')

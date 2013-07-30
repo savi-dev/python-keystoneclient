@@ -59,12 +59,12 @@ class Manager(object):
     def __init__(self, api):
         self.api = api
 
-    def _list(self, url, response_key, obj_class=None, body=None):
+    def _list(self, url, response_key, obj_class=None, body=None, management=True):
         resp = None
         if body:
             resp, body = self.api.post(url, body=body)
         else:
-            resp, body = self.api.get(url)
+            resp, body = self.api.get(url, management=management)
 
         if obj_class is None:
             obj_class = self.resource_class
