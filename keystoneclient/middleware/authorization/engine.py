@@ -8,7 +8,7 @@ import abc
 import logging
 
 from keystoneclient.openstack.common import jsonutils
-LOG= logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 
@@ -46,13 +46,12 @@ class Brain(object):
     def __init__(self, rules=None, default_rule=None):
         self.rules = rules or {}
         self.default_rule = default_rule
-        LOG.debug("RRRRRRRRRRRRRRRRRRRR %s" % rules)
-        
+
 
     def add_rule(self, key, match):
         self.rules[key] = match
 
-    def _check(self, match, target_dict, cred_dict): 
+    def _check(self, match, target_dict, cred_dict):
         try:
             match_kind, match_value = match.split(':', 1)
         except Exception:
@@ -141,6 +140,10 @@ class TrueCheck(BaseCheck):
     def __call__(self, target, cred):
         return True
 
+class Check(BaseCheck):
+    def __init__(self, kind, match):
+        self.kind = kind
+        self.match = match
 
 def register(name, func=None):
     """
@@ -165,7 +168,7 @@ def _check_rule(brain, match_kind, match, target_dict, cred_dict):
        if brain.default_rule and match != brain.default_rule:
           new_match_list = ('rule:%s' % brain.default_rule,)
        else:
-          return False          
+          return False
 
    return brain.check(new_match_list, target_dict, cred_dict)
 
@@ -176,14 +179,19 @@ def _check_role(brain, match_kind, match, target_dict, context):
     return match.lower() in [x.lower() for x in context.roles]
 
 @register('tenant_id')
-def _check_tenant_id(brain, match_kind, match, taget_dict, context):
-    LOG.debug("Checking Tenant Id%s" % match)
-    return match.lower() == context.tenant_id.lower()
+def _check_tenant_id(brain, match_kind, match, target_dict, context):
+    LOG.debug("Checking Tenant Id %s - %s" % (match, match_kind))
+    if '%' in match:
+        match = target_dict[match_kind]
+
+    result = match.lower() == context.tenant_id.lower()
+    LOG.debug("Target tenant ID %s , user's tenant ID %s" % (match.lower(), context.tenant_id.lower()))
+    return result
 
 @register('tenant')
 def _check_tenant_id(brain, match_kind, match, taget_dict, context):
     LOG.debug("Checking Tenant Name %s" % match)
-    result= match.lower() == context.tenant.lower()
+    result = match.lower() == context.tenant.lower()
     return result
 
 
@@ -201,7 +209,7 @@ def _check_generic(brain, match_kind, match, target_dict, context):
     return False
 
 @register('field')
-class FieldCheck(policy.Check):
+class FieldCheck(Check):
     def __init__(self, kind, match):
         # Process the match
         resource, field_value = match.split(':', 1)
