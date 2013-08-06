@@ -38,11 +38,15 @@ opts = [
     cfg.StrOpt('admin_user'),
     cfg.StrOpt('admin_password'),
     cfg.StrOpt('admin_tenant_name', default='admin'),
-    cfg.StrOpt('certfile'),
-    cfg.StrOpt('keyfile'),
-    cfg.StrOpt('signing_dir'),
+    cfg.StrOpt('stub_mode', default=False),
+    cfg.ListOpt('memcached_servers', deprecated_name='memcache_servers'),
+    cfg.StrOpt('memcache_security_strategy', default=None),
+    cfg.StrOpt('memcache_secret_key', default=None, secret=True),
+    cfg.IntOpt('policy_cache_time', default=300)
 ]
 CONF.register_opts(opts, group='keystone_policy')
+
+CACHE_KEY_TEMPLATE = 'policies'
 
 class InvalidPolicy(Exception):
     pass
@@ -78,33 +82,18 @@ class Authorize(object):
             self.auth_uri = '%s://%s:%s' % (self.auth_protocol,
                                             self.auth_host,
                                             self.auth_port)
-
-        # SSL
-        self.cert_file = self._conf_get('certfile')
-        self.key_file = self._conf_get('keyfile')
-
-        #signing
-        self.signing_dirname = self._conf_get('signing_dir')
-        if self.signing_dirname is None:
-            self.signing_dirname = '%s/keystone-signing' % os.environ['HOME']
-        self.logger.info('Using %s as cache directory for signing certificate' %
-                 self.signing_dirname)
-        if (os.path.exists(self.signing_dirname) and
-                not os.access(self.signing_dirname, os.W_OK)):
-                raise ConfigurationError("unable to access signing dir %s" %
-                                         self.signing_dirname)
-
-        if not os.path.exists(self.signing_dirname):
-            os.makedirs(self.signing_dirname)
-        #will throw IOError  if it cannot change permissions
-        os.chmod(self.signing_dirname, stat.S_IRWXU)
-
-        val = '%s/signing_cert.pem' % self.signing_dirname
-        self.signing_cert_file_name = val
-        val = '%s/cacert.pem' % self.signing_dirname
-        self.ca_file_name = val
-        val = '%s/revoked.pem' % self.signing_dirname
-        self.revoked_file_name = val
+        # memcache
+        self._cache = None
+        self._cache_initialized = False
+        # memcache value treatment, ENCRYPT or MAC
+        self._memcache_security_strategy = \
+            self._conf_get('memcache_security_strategy')
+        if self._memcache_security_strategy is not None:
+            self._memcache_security_strategy = \
+                self._memcache_security_strategy.upper()
+        self._memcache_secret_key = \
+            self._conf_get('memcache_secret_key')
+        self.policy_cache_time = int(self._conf_get('policy_cache_time'))
 
         # Credentials used to verify this component with the Auth service since
         # validating tokens is a privileged call
@@ -112,6 +101,21 @@ class Authorize(object):
         self.admin_user = self._conf_get('admin_user')
         self.admin_password = self._conf_get('admin_password')
         self.admin_tenant_name = self._conf_get('admin_tenant_name')
+
+
+    def _init_cache(self, env):
+        cache = self._conf_get('cache')
+        memcache_servers = self._conf_get('memcached_servers')
+
+        if cache and env.get(cache, None) is not None:
+            # use the cache from the upstream filter
+            self.LOG.info('Using %s memcache for caching token', cache)
+            self._cache = env.get(cache)
+        else:
+            # use Keystone memcache
+            self._cache = memorycache.get_client(memcache_servers)
+        self._cache_initialized = True
+
 
     def _conf_get(self, name):
         # try config from paste-deploy first
@@ -135,22 +139,19 @@ class Authorize(object):
         return ctx
 
     def __call__(self, env, start_response):
-        token, policy = self._request_admin_token()
+        if not self._cache_initialized:
+            self._init_cache(env)
+
+        if not self._conf_get('stub_mode'):
+            self.create_middleware_header(env)
+        return self.app(env, start_response)
+
+    def create_middleware_header(self, env):
         context = self._build_KeystoneContext(env)
         self.logger.debug("Printing Identity %s" % context)
         self._add_headers(env, {'X-Authorized': 'NO'})
         self._add_headers(env, {'context':context})
-        self._add_headers(env, {'updateBrain':self.updateBrain})
-        return self.app(env, start_response)
-
-    def updateBrain(self):
-        self.logger.debug('Updating Policy')
-        
-        policy = self.get_policy()
-        #self.logger.debug("Fetching policies %s" % policy)
-  
-        return policy
-        
+        self._add_headers(env, {'getpolicy':self.get_policy})
 
     def get_admin_token(self):
         """Return admin token, possibly fetching a new one.
@@ -159,7 +160,7 @@ class Authorize(object):
         :raise ServiceError when unable to retrieve token from keystone
 
         """
-       
+
         self.admin_token, self.policy = self._request_admin_token()
 
         return self.admin_token, self.policy
@@ -183,7 +184,7 @@ class Authorize(object):
 
         """
         conn = self._get_http_connection()
-        
+
         RETRIES = 3
         retry = 0
         while True:
@@ -201,7 +202,7 @@ class Authorize(object):
                 retry += 1
             finally:
                 conn.close()
-                
+
         return response, body
 
     def _json_request(self, method, path, body=None, additional_headers=None):
@@ -283,16 +284,10 @@ class Authorize(object):
 
     def get_policy(self):
         token, policy = self.get_admin_token()
-        if policy is not None:
-            if self.current_policy is not None and self.current_policy['timestamp'] == policy[0]['timestamp']:
-                return self.current_policy['blob']
-            
-            fetched_policy = self._fetch_policy(token, policy[0])
-            if fetched_policy:
-                self.current_policy = fetched_policy
-                return fetched_policy['blob']
+        if self._cache is not None:
+            return self._cache_get(policy, token)
         return None
-        
+
     def _fetch_policy(self, token, policy_meta):
         """ Fetch policy from Keystone """
         headers = {'X-Auth-Token': token}
@@ -312,44 +307,67 @@ class Authorize(object):
             self.logger.error('Bad response code while fetching policy: %s' %
                       response.status)
 
-    def cert_file_missing(self, called_proc_err, file_name):
-        return (called_proc_err.output.find(file_name)
-                and not os.path.exists(file_name))
-
-    def fetch_signing_cert(self):
-        response, data = self._http_request('GET',
-                                            '/v2.0/certificates/signing')
-        try:
-            #todo check response
-            certfile = open(self.signing_cert_file_name, 'w')
-            certfile.write(data)
-            certfile.close()
-        except (AssertionError, KeyError):
-            self.logger.warn("Unexpected response from keystone service: %s", data)
-            raise ServiceError('invalid json response')
-
-    def fetch_ca_cert(self):
-        response, data = self._http_request('GET',
-                                            '/v2.0/certificates/ca')
-        try:
-            #todo check response
-            certfile = open(self.ca_file_name, 'w')
-            certfile.write(data)
-            certfile.close()
-        except (AssertionError, KeyError):
-            self.logger.warn("Unexpected response from keystone service: %s", data)
-            raise ServiceError('invalid json response')
-
-    def denied_response(self, req):
-        """Deny WSGI Response.
-
-        Returns a standard WSGI response callable with the status of 403 or 401
-        depending on whether the REMOTE_USER is set or not.
+    def _cache_get(self, policy, token):
+        """Return policy information from cache.
         """
-        if req.remote_user:
-            return webob.exc.HTTPForbidden(request=req)
+
+        if self._cache and policy:
+            if self._memcache_security_strategy is None:
+                key = CACHE_KEY_TEMPLATE
+                timestamp, serialized = self._cache.get(key)
+            else:
+                keys = memcache_crypt.derive_keys(
+                    token,
+                    self._memcache_secret_key,
+                    self._memcache_security_strategy)
+                cache_key = CACHE_KEY_TEMPLATE % (
+                    memcache_crypt.get_cache_key(keys))
+                raw_cached = self._cache.get(cache_key)
+                try:
+                    serialized = memcache_crypt.unprotect_data(keys,
+                                                               raw_cached)
+                except Exception:
+                    msg = 'Failed to decrypt/verify cache data'
+                    self.LOG.exception(msg)
+                    serialized = None
+
+            if serialized is None:
+                return None
+
+            cached = json.loads(serialized)
+            if timestamp == policy[0]['timestamp']:
+                self.LOG.debug('Policy is synced')
+                return cached
+            else:
+                self.LOG.debug('Cached Policy %s seems expired', policy)
+                new_policy = self._fetch_policy(token, policy[0])
+                self._cache_store(new_policy)
+
+    def _cache_store(self, policy):
+        """Store value into memcache.
+
+        data may be the string 'invalid' or a tuple like (data, expires)
+
+        """
+        serialized_data = json.dumps(policy['blob'])
+        if self._memcache_security_strategy is None:
+            cache_key = CACHE_KEY_TEMPLATE
+            data_to_store = (policy['timestamp'],serialized_data)
         else:
-            return webob.exc.HTTPUnauthorized(request=req) 
+            keys = memcache_crypt.derive_keys(
+                token,
+                self._memcache_secret_key,
+                self._memcache_security_strategy)
+            cache_key = CACHE_KEY_TEMPLATE % memcache_crypt.get_cache_key(keys)
+            data_to_store = memcache_crypt.protect_data(keys, serialized_data)
+        try:
+            self._cache.set(cache_key,
+                            data_to_store,
+                            time=self.policy_cache_time)
+        except(TypeError):
+            self._cache.set(cache_key,
+                            data_to_store,
+                            timeout=self.policy_cache_time)
 
     def _header_to_env_var(self, key):
         """Convert header to wsgi env variable.
@@ -365,9 +383,9 @@ class Authorize(object):
         for (k, v) in headers.iteritems():
             env_key = self._header_to_env_var(k)
             env[env_key] = v
-         
-        
-        
+
+
+
 def filter_factory(global_conf, **local_conf):
     """Returns a WSGI filter app for use with paste.deploy."""
     conf = global_conf.copy()

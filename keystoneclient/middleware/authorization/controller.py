@@ -57,7 +57,7 @@ def protected(action='None'):
                action,
                 ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
            context = request.headers['context']
-           method = request.headers['updateBrain']
+           method = request.headers['getpolicy']
            init(method)
            match_list = ("rule:%s" % action,)
            if not _BRAIN.check(match_list, {}, context):
@@ -84,7 +84,7 @@ def filterprotected(action):
             filters = None
             if not context['is_admin']:
                 context = request.headers['context']
-                method = request.headers['updateBrain']
+                method = request.headers['getpolicy']
                 init(method)
                 LOG.debug(_('ABAC: Creating Filter'))
                 _filter = filter(context, action)
