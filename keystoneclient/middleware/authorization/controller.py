@@ -56,8 +56,11 @@ def protected(action='None'):
            LOG.debug(_('ABAC: Authorizing %s(%s)') % (
                action,
                 ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
-           context = request.headers['context']
-           method = request.headers['getpolicy']
+           try:
+               context = request.headers['context']
+               method = request.headers['getpolicy']
+           except:
+               return f(self, request, **kwargs)
            init(method)
            match_list = ("rule:%s" % action,)
            if not _BRAIN.check(match_list, {}, context):

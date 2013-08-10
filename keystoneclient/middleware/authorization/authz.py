@@ -9,6 +9,9 @@ import webob.exc
 
 from keystoneclient.middleware.authorization import engine,context
 from keystoneclient.openstack.common import jsonutils
+from keystoneclient.middleware import memcache_crypt
+from keystoneclient.openstack.common import memorycache
+from keystoneclient.openstack.common import timeutils
 
 
 CONF = None
@@ -40,6 +43,7 @@ opts = [
     cfg.StrOpt('admin_tenant_name', default='admin'),
     cfg.StrOpt('stub_mode', default=False),
     cfg.ListOpt('memcached_servers', deprecated_name='memcache_servers'),
+    cfg.StrOpt('cache', default=None),
     cfg.StrOpt('memcache_security_strategy', default=None),
     cfg.StrOpt('memcache_secret_key', default=None, secret=True),
     cfg.IntOpt('policy_cache_time', default=300)
