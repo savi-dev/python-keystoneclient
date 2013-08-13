@@ -40,7 +40,7 @@ class Tenant(base.Resource):
 #        new_name = name if name else self.name
 #        new_description = description if description else self.description
 #        new_enabled = enabled if enabled is not None else self.enabled
-       
+
         try:
 #            retval = self.manager.update(self.id, tenant_name=new_name,
 #                                         description=new_description,
@@ -85,7 +85,7 @@ class TenantManager(base.ManagerWithFind):
 
         return self._create('/tenants', params, "tenant")
 
-    def list(self, limit=None, marker=None):
+    def list(self, limit=None, marker=None, management=True):
         """
         Get a list of tenants.
 
@@ -107,7 +107,7 @@ class TenantManager(base.ManagerWithFind):
         if params:
             query = "?" + urllib.urlencode(params)
 
-        return self._list("/tenants%s" % query, "tenants")
+        return self._list("/tenants%s" % query, "tenants", management=management)
 
     def update(self, tenant_id, kwargs):
         """
