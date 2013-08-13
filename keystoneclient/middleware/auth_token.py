@@ -329,7 +329,8 @@ class AuthProtocol(object):
 
         # Credentials used to verify this component with the Auth service since
         # validating tokens is a privileged call
-        self.admin_token = self._conf_get('admin_token')
+        self.admin_token = None
+        self.admin_token_info = None
         self.admin_token_expiry = None
         self.admin_user = self._conf_get('admin_user')
         self.admin_password = self._conf_get('admin_password')
@@ -356,6 +357,7 @@ class AuthProtocol(object):
         http_connect_timeout_cfg = self._conf_get('http_connect_timeout')
         self.http_connect_timeout = (http_connect_timeout_cfg and
                                      int(http_connect_timeout_cfg))
+        self.get_admin_token()
         self.auth_version = None
 
     def _assert_valid_memcache_protection_config(self):
@@ -474,6 +476,7 @@ class AuthProtocol(object):
                 return self._reject_request(env, start_response)
         except TokenNotFound:
             if self._authenticate_remote_user(env.get('REMOTE_ADDR')):
+                self.LOG.debug('authenticating using remote user')
                 token_info = self.get_admin_token_info()
                 env['keystone.token_info'] = token_info
                 user_headers = self._build_user_headers(token_info)
