@@ -42,7 +42,7 @@ def do_user_get(kc, args):
 
 @utils.arg('--name', metavar='<user-name>', required=True,
            help='New user name (must be unique)')
-@utils.arg('--tenant-id', metavar='<tenant-id>', 
+@utils.arg('--tenant-id', metavar='<tenant-id>',
            help='New user default tenant')
 @utils.arg('--tenant_id', help=argparse.SUPPRESS)
 @utils.arg('--pass', metavar='<pass>', dest='passwd',
@@ -87,15 +87,19 @@ def do_user_update(kc, args):
     except Exception, e:
         print 'Unable to update user: %s' % e
 
-@utils.arg('--pass', metavar='<password>', dest='passwd', required=True,
+@utils.arg('--pass', metavar='<password>', dest='passwd', required=False,
            help='Desired new password')
 @utils.arg('user', metavar='<user>',
            help='Name or ID of user to update password')
 def do_user_password_update(kc, args):
-    """Update user password"""
+    """Update user password."""
     user = utils.find_resource(kc.users, args.user)
-    kc.users.update_password(user, args.passwd)
-
+    new_passwd = args.passwd or utils.prompt_for_password()
+    if new_passwd is None:
+        msg = ("\nPlease specify password using the --pass option "
+               "or using the prompt")
+        sys.exit(msg)
+    kc.users.update_password(user, new_passwd)
 
 @utils.arg('--current-password', metavar='<current-password>',
            dest='currentpasswd', required=False, help='Current password, '
@@ -141,6 +145,10 @@ def do_tenant_list(kc, args):
     tenants = kc.tenants.list()
     utils.print_list(tenants, ['id', 'name', 'enabled'])
 
+def do_user_tenant_list(kc, args):
+    """List all tenants"""
+    tenants = kc.tenants.list(management=False)
+    utils.print_list(tenants, ['id', 'name', 'enabled'])
 
 @utils.arg('tenant', metavar='<tenant>',
            help='Name or ID of tenant to display')
@@ -486,22 +494,23 @@ def do_endpoint_delete(kc, args):
 def do_token_get(kc, args):
     """Display the current user token"""
     utils.print_dict(kc.service_catalog.get_token())
-    
+
 @utils.arg('--policy', metavar='<policy-blob>', required=True,
            help='File contains the policy')
-@utils.arg('--service-id', metavar='<service-id>',
+@utils.arg('--service', metavar='<service-id>',
            help='Id of service')
 @utils.arg('--type', metavar='<Mime-Type>',
            help='Encoding type of policy')
 def do_policy_create(kc, args):
     """Create new user"""
     import json
+    service = utils.find_resource(kc.services, args.service)
     try:
         with open(args.policy,"r") as f:
             blob = json.load(f,object_hook=utils.convert)
     except IOError as e:
         print "I/O error({0}): {1}".format(e.errno, e.strerror)
-    policy = kc.policies.create(json.dumps(blob), args.service_id,args.type)
+    policy = kc.policies.create(json.dumps(blob), service.id,args.type)
     utils.print_dict(policy._info,100)
 
 @utils.arg('id', metavar='<policy-id>', help='Policy ID to display')
@@ -519,4 +528,4 @@ def do_policy_list(kc, args):
     """Display Policies associated with a tenant"""
     policies = kc.policies.list()
     utils.print_list(policies, ['id', 'type', 'service_id'],
-                     order_by='id') 
+                     order_by='id')

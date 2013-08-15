@@ -244,6 +244,8 @@ def safe_quote(s):
 class InvalidUserToken(Exception):
     pass
 
+class TokenNotFound(Exception):
+    pass
 
 class ServiceError(Exception):
     pass
@@ -327,7 +329,8 @@ class AuthProtocol(object):
 
         # Credentials used to verify this component with the Auth service since
         # validating tokens is a privileged call
-        self.admin_token = self._conf_get('admin_token')
+        self.admin_token = None
+        self.admin_token_info = None
         self.admin_token_expiry = None
         self.admin_user = self._conf_get('admin_user')
         self.admin_password = self._conf_get('admin_password')
@@ -354,6 +357,7 @@ class AuthProtocol(object):
         http_connect_timeout_cfg = self._conf_get('http_connect_timeout')
         self.http_connect_timeout = (http_connect_timeout_cfg and
                                      int(http_connect_timeout_cfg))
+        self.get_admin_token()
         self.auth_version = None
 
     def _assert_valid_memcache_protection_config(self):
@@ -449,18 +453,12 @@ class AuthProtocol(object):
         we can't authenticate.
 
         """
-
         # initialize memcache if we haven't done so
         if not self._cache_initialized:
             self._init_cache(env)
-        
         self.LOG.debug('Authenticating user token')
         try:
-            self._remove_auth_headers(env)
-            if self._authenticate_remote_user(env.get('REMOTE_ADDR')):
-               user_token = self.get_admin_token()
-            else:
-               user_token = self._get_user_token_from_header(env)
+            user_token = self._get_user_token_from_header(env)
             token_info = self._validate_user_token(user_token)
             env['keystone.token_info'] = token_info
             user_headers = self._build_user_headers(token_info)
@@ -476,7 +474,15 @@ class AuthProtocol(object):
             else:
                 self.LOG.info('Invalid user token - rejecting request')
                 return self._reject_request(env, start_response)
-
+        except TokenNotFound:
+            if self._authenticate_remote_user(env.get('REMOTE_ADDR')):
+                self.LOG.debug('authenticating using remote user')
+                token_info = self.get_admin_token_info()
+                env['keystone.token_info'] = token_info
+                user_headers = self._build_user_headers(token_info)
+                self._add_headers(env, user_headers)
+                return self.app(env, start_response)
+            return self._reject_request(env, start_response)
         except ServiceError as e:
             self.LOG.critical('Unable to obtain admin token: %s' % e)
             resp = webob.exc.HTTPServiceUnavailable()
@@ -537,7 +543,7 @@ class AuthProtocol(object):
                 self.LOG.warn("Unable to find authentication token"
                               " in headers")
                 self.LOG.debug("Headers: %s", env)
-            raise InvalidUserToken('Unable to find token in headers')
+            raise TokenNotFound('Unable to find token in headers')
 
     def _reject_request(self, env, start_response):
         """Redirect client to auth server.
@@ -568,9 +574,20 @@ class AuthProtocol(object):
 
         if not self.admin_token:
             (self.admin_token,
-             self.admin_token_expiry) = self._request_admin_token()
+             self.admin_token_expir, self.admin_token_info) = self._request_admin_token()
 
         return self.admin_token
+    
+    def get_admin_token_info(self):
+        if self.admin_token_expiry:
+            if will_expire_soon(self.admin_token_expiry):
+                self.admin_token = None
+
+        if not self.admin_token:
+            (self.admin_token,
+             self.admin_token_expiry, self_admin_token_info) = self._request_admin_token()
+
+        return self.admin_token_info
 
     def _get_http_connection(self):
         if self.auth_protocol == 'http':
@@ -684,7 +701,7 @@ class AuthProtocol(object):
             assert token
             assert expiry
             datetime_expiry = timeutils.parse_isotime(expiry)
-            return (token, timeutils.normalize_time(datetime_expiry))
+            return (token, timeutils.normalize_time(datetime_expiry), data)
         except (AssertionError, KeyError):
             self.LOG.warn(
                 "Unexpected response from keystone service: %s", data)
