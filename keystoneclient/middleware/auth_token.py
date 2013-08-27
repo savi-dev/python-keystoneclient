@@ -540,7 +540,7 @@ class AuthProtocol(object):
             return token
         else:
             if not self.delay_auth_decision:
-                self.LOG.warn("Unable to find authentication token"
+                self.LOG.debug("Unable to find authentication token"
                               " in headers")
                 self.LOG.debug("Headers: %s", env)
             raise TokenNotFound('Unable to find token in headers')
