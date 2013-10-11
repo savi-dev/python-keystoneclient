@@ -113,7 +113,7 @@ class Authorize(object):
 
         if cache and env.get(cache, None) is not None:
             # use the cache from the upstream filter
-            self.LOG.info('Using %s memcache for caching token', cache)
+            #self.LOG.info('Using %s memcache for caching token', cache)
             self._cache = env.get(cache)
         else:
             # use Keystone memcache
@@ -199,7 +199,7 @@ class Authorize(object):
                 break
             except Exception, e:
                 if retry == RETRIES:
-                        self.LOG.error('HTTP connection exception: %s' % e)
+                        #self.LOG.error('HTTP connection exception: %s' % e)
                         raise ServiceError('Unable to communicate with keystone')
                 self.logger.warn('Retrying on HTTP connection exception: %s' % e)
                 time.sleep(2.0 ** retry / 2)
@@ -318,34 +318,39 @@ class Authorize(object):
         if self._cache and policy:
             if self._memcache_security_strategy is None:
                 key = CACHE_KEY_TEMPLATE
-                timestamp, serialized = self._cache.get(key)
+                try:
+                   timestamp, serialized = self._cache.get(key)
+                except: 
+                   timestamp = None
+                   serialized = None
             else:
                 keys = memcache_crypt.derive_keys(
                     token,
                     self._memcache_secret_key,
                     self._memcache_security_strategy)
-                cache_key = CACHE_KEY_TEMPLATE % (
-                    memcache_crypt.get_cache_key(keys))
-                raw_cached = self._cache.get(cache_key)
                 try:
+                    cache_key = CACHE_KEY_TEMPLATE % (
+                        memcache_crypt.get_cache_key(keys))
+                    raw_cached = self._cache.get(cache_key)
                     serialized = memcache_crypt.unprotect_data(keys,
                                                                raw_cached)
                 except Exception:
                     msg = 'Failed to decrypt/verify cache data'
-                    self.LOG.exception(msg)
+                    self.logger.exception(msg)
                     serialized = None
 
-            if serialized is None:
-                return None
+            #if serialized is None:
+            #    return None
 
-            cached = json.loads(serialized)
-            if timestamp == policy[0]['timestamp']:
-                self.LOG.debug('Policy is synced')
+            if serialized and timestamp == policy[0]['timestamp']:
+                cached = jsonutils.loads(serialized)
+                self.logger.debug('Policy is synced')
                 return cached
             else:
-                self.LOG.debug('Cached Policy %s seems expired', policy)
+                #self.LOG.debug('Cached Policy %s seems expired', policy)
                 new_policy = self._fetch_policy(token, policy[0])
                 self._cache_store(new_policy)
+                return new_policy['blob']
 
     def _cache_store(self, policy):
         """Store value into memcache.
@@ -353,7 +358,7 @@ class Authorize(object):
         data may be the string 'invalid' or a tuple like (data, expires)
 
         """
-        serialized_data = json.dumps(policy['blob'])
+        serialized_data = jsonutils.dumps(policy['blob'])
         if self._memcache_security_strategy is None:
             cache_key = CACHE_KEY_TEMPLATE
             data_to_store = (policy['timestamp'],serialized_data)
