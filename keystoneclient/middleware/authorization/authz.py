@@ -130,7 +130,7 @@ class Authorize(object):
 
     def _build_KeystoneContext(self, environ):
         """Extract the identity from the Keystone auth component."""
-        self.logger.debug("VVV %s" % environ.get('HTTP_X_TENANT', None))
+#        self.logger.debug("VVV %s" % environ.get('HTTP_X_TENANT', None))
         if environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed':
             return
         user_id = environ.get('HTTP_X_USER_ID', None)
@@ -151,7 +151,7 @@ class Authorize(object):
         return self.app(env, start_response)
 
     def create_middleware_header(self, env):
-        context = self._build_KeystoneContext(env)
+#        context = self._build_KeystoneContext(env)
         self.logger.debug("Printing Identity %s" % context)
         self._add_headers(env, {'X-Authorized': 'NO'})
         self._add_headers(env, {'context':context})
