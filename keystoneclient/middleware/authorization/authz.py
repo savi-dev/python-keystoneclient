@@ -151,8 +151,8 @@ class Authorize(object):
         return self.app(env, start_response)
 
     def create_middleware_header(self, env):
-#        context = self._build_KeystoneContext(env)
-        self.logger.debug("Printing Identity %s" % context)
+        context = self._build_KeystoneContext(env)
+#        self.logger.debug("Printing Identity %s" % context)
         self._add_headers(env, {'X-Authorized': 'NO'})
         self._add_headers(env, {'context':context})
         self._add_headers(env, {'getpolicy':self.get_policy})
