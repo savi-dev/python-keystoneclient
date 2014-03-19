@@ -309,7 +309,10 @@ opts = [
                ' unknown the token will be rejected. "required" any form of'
                ' token binding is needed to be allowed. Finally the name of a'
                ' binding method that must be present in tokens.'),
+    cfg.ListOpt('remote_users', default=None, help='contains list of trusted '
+                'remote parties'),       
 ]
+
 CONF.register_opts(opts, group='keystone_authtoken')
 
 LIST_OF_VERSIONS_TO_ATTEMPT = ['v2.0', 'v3.0']
@@ -367,6 +370,8 @@ def safe_quote(s):
 class InvalidUserToken(Exception):
     pass
 
+class TokenNotFound(Exception):
+    pass
 
 class ServiceError(Exception):
     pass
@@ -414,6 +419,9 @@ class AuthProtocol(object):
         self.auth_admin_prefix = self._conf_get('auth_admin_prefix')
         self.auth_uri = self._conf_get('auth_uri')
 
+        #REMOTE USER
+        self.remote_users = self._conf_get('remote_users')  
+        
         if netaddr.valid_ipv6(auth_host):
             # Note(dzyu) it is an IPv6 address, so it needs to be wrapped
             # with '[]' to generate a valid IPv6 URL, based on
@@ -455,7 +463,8 @@ class AuthProtocol(object):
 
         # Credentials used to verify this component with the Auth service since
         # validating tokens is a privileged call
-        self.admin_token = self._conf_get('admin_token')
+        self.admin_token = None
+        self.admin_token_info = None
         self.admin_token_expiry = None
         self.admin_user = self._conf_get('admin_user')
         self.admin_password = self._conf_get('admin_password')
@@ -485,6 +494,8 @@ class AuthProtocol(object):
         self.auth_version = None
         self.http_request_max_retries = \
             self._conf_get('http_request_max_retries')
+
+        self.get_admin_token()
 
         self.include_service_catalog = self._conf_get(
             'include_service_catalog')
@@ -608,12 +619,28 @@ class AuthProtocol(object):
                 self.LOG.info('Invalid user token - rejecting request')
                 return self._reject_request(env, start_response)
 
+        except TokenNotFound:
+            if self._authenticate_remote_user(env.get('REMOTE_ADDR')):
+                self.LOG.debug('authenticating using remote user')
+                token_info = self.get_admin_token_info()
+                env['keystone.token_info'] = token_info
+                user_headers = self._build_user_headers(token_info)
+                self._add_headers(env, user_headers)
+                return self.app(env, start_response)
+            return self._reject_request(env, start_response)
         except ServiceError as e:
             self.LOG.critical('Unable to obtain admin token: %s', e)
             resp = MiniResp('Service unavailable', env)
             start_response('503 Service Unavailable', resp.headers)
             return resp.body
 
+    def _authenticate_remote_user(self, src_addr):
+        if self.remote_users is not None:
+           if src_addr in self.remote_users:
+              self.LOG.debug("Remote User Authentication")
+              return True
+        return False
+ 
     def _remove_auth_headers(self, env):
         """Remove headers so a user can't fake authentication.
 
@@ -662,7 +689,7 @@ class AuthProtocol(object):
                 self.LOG.warn("Unable to find authentication token"
                               " in headers")
                 self.LOG.debug("Headers: %s", env)
-            raise InvalidUserToken('Unable to find token in headers')
+            raise TokenNotFound('Unable to find token in headers')
 
     def _reject_request(self, env, start_response):
         """Redirect client to auth server.
@@ -694,9 +721,20 @@ class AuthProtocol(object):
 
         if not self.admin_token:
             (self.admin_token,
-             self.admin_token_expiry) = self._request_admin_token()
+             self.admin_token_expiry, self.admin_token_info) = self._request_admin_token()
 
         return self.admin_token
+
+    def get_admin_token_info(self):
+        if self.admin_token_expiry:
+            if will_expire_soon(self.admin_token_expiry):
+                self.admin_token = None
+
+        if not self.admin_token:
+            (self.admin_token,
+             self.admin_token_expiry, self.admin_token_info) = self._request_admin_token()
+
+        return self.admin_token_info
 
     def _http_request(self, method, path, **kwargs):
         """HTTP request helper used to make unspecified content type requests.
@@ -805,7 +843,7 @@ class AuthProtocol(object):
             if not (token and expiry):
                 raise AssertionError('invalid token or expire')
             datetime_expiry = timeutils.parse_isotime(expiry)
-            return (token, timeutils.normalize_time(datetime_expiry))
+            return (token, timeutils.normalize_time(datetime_expiry), data)
         except (AssertionError, KeyError):
             self.LOG.warn(
                 "Unexpected response from keystone service: %s", data)
