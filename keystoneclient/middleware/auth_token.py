@@ -603,12 +603,13 @@ class AuthProtocol(object):
         try:
             self._remove_auth_headers(env)
             user_token = self._get_user_token_from_header(env)
+            if 'None' in user_token:
+                raise TokenNotFound('Token is none')
             token_info = self._validate_user_token(user_token, env)
             env['keystone.token_info'] = token_info
             user_headers = self._build_user_headers(token_info)
             self._add_headers(env, user_headers)
             return self.app(env, start_response)
-
         except InvalidUserToken:
             if self.delay_auth_decision:
                 self.LOG.info(
@@ -618,11 +619,15 @@ class AuthProtocol(object):
             else:
                 self.LOG.info('Invalid user token - rejecting request')
                 return self._reject_request(env, start_response)
-
         except TokenNotFound:
             if self._authenticate_remote_user(env.get('REMOTE_ADDR')):
                 self.LOG.debug('authenticating using remote user')
                 token_info = self.get_admin_token_info()
+                token_info.pop('serviceCatalog', None)
+                if token_info.get('access', {}).get('serviceCatalog', None):
+                    del token_info['access']['serviceCatalog']
+                if token_info.get('serviceCatalog', None):
+                    del token_info['serviceCatalog']
                 env['keystone.token_info'] = token_info
                 user_headers = self._build_user_headers(token_info)
                 self._add_headers(env, user_headers)
@@ -983,6 +988,7 @@ class AuthProtocol(object):
             'X-Tenant-Name': project_name,
             'X-Tenant': project_name,
             'X-Role': roles,
+            'X-Auth-Token': token['id'],
         }
 
         self.LOG.debug("Received request from user: %s with project_id : %s"
